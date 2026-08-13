@@ -107,13 +107,20 @@ class CoinController
 
     private function formatSingleItem(int $id): array
     {
-        $designer_ids = get_field('designers', $id) ?: [];
-        $designers = array_map(function ($designer_id) {
-            return [
-                'id'   => $designer_id,
-                'name' => get_the_title($designer_id),
-            ];
-        }, (array) $designer_ids);
+        $designer_roles = [
+            'designers_artist'     => 'designers_artist',
+            'designers_designer'   => 'designers_designer',
+            'designers_adaptation' => 'designers_adaptation',
+            'designers_sculptor'   => 'designers_sculptor',
+        ];
+        $designers = [];
+        foreach ($designer_roles as $key => $meta) {
+            $ids = get_field($meta, $id) ?: [];
+            $designers[$key] = array_map(fn($did) => [
+                'id'   => $did,
+                'name' => get_the_title($did),
+            ], (array) $ids);
+        }
 
         $gallery_ids = get_field('images_gallery', $id) ?: [];
         $gallery = array_map(function ($attachment_id) {

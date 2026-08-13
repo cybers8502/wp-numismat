@@ -61,7 +61,10 @@ class FetchNbuDataCommand
         'material'            => 'material',
         'booklet_url'         => 'booklet_url',
         'description_html'    => 'description_html',    // повний HTML опису
-        'designers'           => 'designers',
+        'designers_artist'     => 'designers_artist',
+        'designers_designer'   => 'designers_designer',
+        'designers_adaptation' => 'designers_adaptation',
+        'designers_sculptor'   => 'designers_sculptor',
         'mintage_declared'    => 'mintage_declared',
         'mintage_actual'      => 'mintage_actual',
         'diameter_mm'         => 'diameter_mm',
@@ -235,14 +238,17 @@ class FetchNbuDataCommand
             $raw_title = $this->xp_text($xp, ".//div[contains(@class,'title')]", $node);
             $item = [
                 'series'        => $this->xp_text($xp, ".//div[contains(@class,'tag')]", $node),
-                'title'         => $this->strip_metal_mark($raw_title),
-                'nbu_title'     => $raw_title,
+                'title'         => $raw_title,
+                'short_title'   => $this->strip_metal_mark($raw_title),
                 'denomination'  => $this->extract_mark($xp, $node, 'Номінал:'),
-                'issue_date'    => $this->normalize_date_ua( $this->extract_mark($xp, $node, 'Дата введення в обіг:') ),
+                'issue_date'    => $this->normalize_date_ua( $this->extract_mark_any($xp, $node, ['Дата введення в обіг:', 'Дата випуску:']) ),
                 'material'      => $this->extract_mark($xp, $node, 'Матеріал:'),
                 'booklet_url'   => $this->abs_url( $this->xp_attr($xp, ".//div[contains(@class,'souvenir-coin__booklet')]//a", "href", $node) ),
                 'description_html' => $this->collect_description_html($xp, $node),
-                'designers'     => $this->extract_mark($xp, $node, 'Художник:'),
+                'designers_artist'     => $this->extract_mark($xp, $node, 'Художник:'),
+                'designers_designer'   => $this->extract_mark($xp, $node, 'Дизайнер:'),
+                'designers_adaptation' => $this->extract_mark($xp, $node, 'Адаптація дизайну:'),
+                'designers_sculptor'   => $this->extract_mark($xp, $node, 'Скульптор:'),
                 'mintage_raw'   => $this->extract_mark($xp, $node, 'Тираж (оголошений/фактичний), шт.:'),
                 'diameter_mm'   => $this->extract_mark($xp, $node, 'Діаметр, мм:'),
                 'quality'       => $this->extract_mark($xp, $node, 'Категорія якості карбування:'),
@@ -362,6 +368,7 @@ class FetchNbuDataCommand
         if (is_wp_error($post_id)) {
             WP_CLI::error('Не вдалось створити пост: ' . $post_id->get_error_message());
         }
+        update_post_meta((int) $post_id, '_nbu_key', $this->nbu_key($title, $item['issue_date'] ?? null));
         $this->fill_meta_acf($post_id, $item);
         return (int)$post_id;
     }
@@ -401,16 +408,25 @@ class FetchNbuDataCommand
 
         $this->assign_taxonomy_single($post_id, 'coin_color', 'Некольорова');
 
-        // ✅ 2) Designers -> separate post type
-        $designer_names = $this->parse_designers($item['designers'] ?? null);
-        $designer_ids   = $this->upsert_designer_posts($designer_names);
-
-        update_post_meta($post_id, 'designers', $designer_ids);
+        // ✅ 2) Designers -> separate post type (per role)
+        $roles = ['designers_artist', 'designers_designer', 'designers_adaptation', 'designers_sculptor'];
+        $names_by_role = $this->resolve_designer_roles([
+            'designers_artist'     => $item['designers_artist']     ?? null,
+            'designers_designer'   => $item['designers_designer']   ?? null,
+            'designers_adaptation' => $item['designers_adaptation'] ?? null,
+            'designers_sculptor'   => $item['designers_sculptor']   ?? null,
+        ]);
+        $designer_ids_by_role = [];
+        foreach ($roles as $role) {
+            $ids = $this->upsert_designer_posts($names_by_role[$role]);
+            $designer_ids_by_role[$role] = $ids;
+            update_post_meta($post_id, $role, $ids);
+        }
 
         // ✅ 3) meta лишається тільки для "даних", а не фасетів
         update_post_meta($post_id, 'issue_date', $item['issue_date'] ?? '');
         update_post_meta($post_id, 'booklet_url', $item['booklet_url'] ?? '');
-        update_post_meta($post_id, 'nbu_title', $item['nbu_title'] ?? '');
+        update_post_meta($post_id, 'short_title', $item['short_title'] ?? '');
 
         if (isset($item['mintage_declared'])) update_post_meta($post_id, 'mintage_declared', $item['mintage_declared']);
         if (isset($item['mintage_actual']))   update_post_meta($post_id, 'mintage_actual', $item['mintage_actual']);
@@ -425,7 +441,9 @@ class FetchNbuDataCommand
             $this->update_acf($post_id, $this->acf_map['issue_date'], $item['issue_date'] ?? '');
             $this->update_acf($post_id, $this->acf_map['booklet_url'], $item['booklet_url'] ?? '');
             $this->update_acf($post_id, $this->acf_map['description_html'], $item['description_html'] ?? '');
-            $this->update_acf($post_id, $this->acf_map['designers'], $designer_ids);
+            foreach ($roles as $role) {
+                $this->update_acf($post_id, $this->acf_map[$role], $designer_ids_by_role[$role]);
+            }
 
             if (isset($item['mintage_declared'])) $this->update_acf($post_id, $this->acf_map['mintage_declared'], $item['mintage_declared']);
             if (isset($item['mintage_actual']))   $this->update_acf($post_id, $this->acf_map['mintage_actual'],   $item['mintage_actual']);
@@ -443,8 +461,28 @@ class FetchNbuDataCommand
         }
     }
 
+    protected function nbu_key(string $title, ?string $issue_date): string
+    {
+        return md5($title . '|' . (string) $issue_date);
+    }
+
     protected function find_existing_post(string $title, ?string $issue_date): ?int {
-        // Шукаємо спочатку за точним заголовком + датою
+        $key = $this->nbu_key($title, $issue_date);
+
+        // Primary: стабільний ключ, не залежить від подальших змін у пості
+        $q = new WP_Query([
+            'post_type'      => $this->post_type,
+            'posts_per_page' => 1,
+            'post_status'    => 'any',
+            'fields'         => 'ids',
+            'meta_query'     => [[
+                'key'   => '_nbu_key',
+                'value' => $key,
+            ]],
+        ]);
+        if (!empty($q->posts)) return (int) $q->posts[0];
+
+        // Fallback для постів, імпортованих до появи _nbu_key
         if ($issue_date) {
             $q = new WP_Query([
                 'post_type'      => $this->post_type,
@@ -457,10 +495,15 @@ class FetchNbuDataCommand
                     'value' => $issue_date,
                 ]],
             ]);
-            if (!empty($q->posts)) return (int) $q->posts[0];
+            if (!empty($q->posts)) {
+                $id = (int) $q->posts[0];
+                update_post_meta($id, '_nbu_key', $key); // бекфіл ключа
+                return $id;
+            }
+            return null; // є дата, але пост не знайдено — створюємо новий
         }
 
-        // Fallback: тільки точний заголовок
+        // Останній fallback: тільки заголовок (коли дата невідома)
         $q = new WP_Query([
             'post_type'      => $this->post_type,
             'posts_per_page' => 1,
@@ -468,7 +511,13 @@ class FetchNbuDataCommand
             'title'          => $title,
             'fields'         => 'ids',
         ]);
-        return !empty($q->posts) ? (int) $q->posts[0] : null;
+        if (!empty($q->posts)) {
+            $id = (int) $q->posts[0];
+            update_post_meta($id, '_nbu_key', $key);
+            return $id;
+        }
+
+        return null;
     }
 
     protected function find_attachment_by_source_url(string $url): ?int
@@ -560,6 +609,85 @@ class FetchNbuDataCommand
         return array_values(array_unique($parts));
     }
 
+    /**
+     * Розбирає сирі рядки по ролях, враховуючи вбудовані анотації.
+     *
+     * Розділювач між записами — кома.
+     * Якщо запис починається з ключового слова ролі + тире, ім'я кидається у ту роль.
+     * Якщо ключового слова немає — ім'я кидається у designers_designer за замовчуванням.
+     *
+     * Приклади:
+     *   Художник: "Дем'яненко, адаптація дизайну – Кучинська"
+     *   → designers_artist=['Дем'яненко'], designers_adaptation=['Кучинська']
+     *
+     *   Скульптор: "Дем'яненко"
+     *   → designers_sculptor=['Дем'яненко']
+     *
+     * @param  array<string,string|null> $raw  ключ = роль, значення = сирий рядок з НБУ
+     * @return array<string,string[]>
+     */
+    protected function resolve_designer_roles(array $raw): array
+    {
+        $result = [
+            'designers_artist'     => [],
+            'designers_designer'   => [],
+            'designers_adaptation' => [],
+            'designers_sculptor'   => [],
+        ];
+
+        // Порядок важливий: довші фрази перевіряємо першими
+        $keywords = [
+            'адаптація дизайну' => 'designers_adaptation',
+            'дизайнер'          => 'designers_designer',
+            'скульптор'         => 'designers_sculptor',
+            'художник'          => 'designers_artist',
+        ];
+
+        foreach ($raw as $label_role => $value) {
+            $value = trim((string) $value);
+            if ($value === '') continue;
+
+            // Розбиваємо по комі — розділювач між записами в одному полі
+            $segments = preg_split('~\s*,\s*~u', $value);
+
+            foreach ($segments as $segment) {
+                $segment = trim($segment);
+                if ($segment === '') continue;
+
+                $assigned_role = $label_role; // роль, визначена HTML-міткою
+                $name_part     = $segment;
+
+                // Перевіряємо вбудовану анотацію: "роль – ПІБ"
+                // Підтримуємо: – (en-dash), — (em-dash), - (hyphen)
+                foreach ($keywords as $keyword => $role) {
+                    $pattern = '~^' . preg_quote($keyword, '~') . '\s*[–—\-]+\s*(.+)$~iu';
+                    if (preg_match($pattern, $segment, $m)) {
+                        $assigned_role = $role;
+                        $name_part     = trim($m[1]);
+                        break;
+                    }
+                }
+
+                // Якщо роль не визначена анотацією і HTML-мітка не відповідає жодній ролі,
+                // кидаємо в дизайнери за замовчуванням
+                if (!array_key_exists($assigned_role, $result)) {
+                    $assigned_role = 'designers_designer';
+                }
+
+                if ($name_part !== '') {
+                    $result[$assigned_role][] = $name_part;
+                }
+            }
+        }
+
+        // Дедублікація
+        foreach ($result as &$names) {
+            $names = array_values(array_unique($names));
+        }
+
+        return $result;
+    }
+
     protected function upsert_designer_posts(array $names): array
     {
         $ids = [];
@@ -634,7 +762,7 @@ class FetchNbuDataCommand
     protected function detect_type(string $title): string
     {
         if (mb_stripos($title, 'сувенір') !== false) {
-            return 'Сувенір';
+            return 'Сувенірна продукція';
         }
         if (mb_stripos($title, 'банкнот') !== false) {
             return 'Банкнота';

@@ -12,10 +12,10 @@ class CoinACFFieldsManager
 
     public function registerGraphqlFields(): void
     {
-        register_graphql_field('Coin', 'nbuTitle', [
+        register_graphql_field('Coin', 'shortTitle', [
             'type'        => 'String',
             'description' => 'Оригінальна назва з сайту НБУ (з позначкою металу)',
-            'resolve'     => fn($post) => get_post_meta($post->databaseId, 'nbu_title', true) ?: null,
+            'resolve'     => fn($post) => get_post_meta($post->databaseId, 'short_title', true) ?: null,
         ]);
     }
 
@@ -50,16 +50,16 @@ class CoinACFFieldsManager
     {
         return [
             [
-                'key'                => 'field_coin_nbu_title',
-                'label'              => 'NBU title',
-                'name'               => 'nbu_title',
+                'key'                => 'field_coin_short_title',
+                'label'              => 'Short title',
+                'name'               => 'short_title',
                 'type'               => 'text',
-                'instructions'       => 'Оригінальна назва з сайту НБУ (з позначкою металу).',
+                'instructions'       => 'Коротка назва',
                 'required'           => 0,
-                'readonly'           => 1,
+                'readonly'           => 0,
                 'wrapper'            => ['width' => '100'],
                 'show_in_graphql'    => 1,
-                'graphql_field_name' => 'nbuTitle',
+                'graphql_field_name' => 'shortTitle',
             ],
             [
                 'key' => 'field_coin_issue_date',
@@ -239,11 +239,53 @@ class CoinACFFieldsManager
                 'wrapper'       => ['width' => '50'],
             ],
             [
-                'key' => 'field_coin_designers',
-                'label' => 'Designers',
-                'name' => 'designers',
+                'key' => 'field_coin_designers_artist',
+                'label' => 'Художник',
+                'name' => 'designers_artist',
                 'type' => 'relationship',
-                'instructions' => 'Обери дизайнерів (CPT Designers).',
+                'instructions' => 'Художник (CPT Designers).',
+                'required' => 0,
+                'post_type' => ['designer'],
+                'filters' => ['search'],
+                'elements' => '',
+                'min' => 0,
+                'max' => 0,
+                'return_format' => 'id',
+            ],
+            [
+                'key' => 'field_coin_designers_designer',
+                'label' => 'Дизайнер',
+                'name' => 'designers_designer',
+                'type' => 'relationship',
+                'instructions' => 'Дизайнер (CPT Designers).',
+                'required' => 0,
+                'post_type' => ['designer'],
+                'filters' => ['search'],
+                'elements' => '',
+                'min' => 0,
+                'max' => 0,
+                'return_format' => 'id',
+            ],
+            [
+                'key' => 'field_coin_designers_adaptation',
+                'label' => 'Адаптація дизайну',
+                'name' => 'designers_adaptation',
+                'type' => 'relationship',
+                'instructions' => 'Адаптація дизайну (CPT Designers).',
+                'required' => 0,
+                'post_type' => ['designer'],
+                'filters' => ['search'],
+                'elements' => '',
+                'min' => 0,
+                'max' => 0,
+                'return_format' => 'id',
+            ],
+            [
+                'key' => 'field_coin_designers_sculptor',
+                'label' => 'Скульптор',
+                'name' => 'designers_sculptor',
+                'type' => 'relationship',
+                'instructions' => 'Скульптор (CPT Designers).',
                 'required' => 0,
                 'post_type' => ['designer'],
                 'filters' => ['search'],

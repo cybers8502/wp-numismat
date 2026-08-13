@@ -51,13 +51,22 @@ class CoinFieldsRegistrar
 
     private function registerDesigners(): void
     {
-        register_graphql_field('Coin', 'designers', [
-            'type'    => ['list_of' => 'Designer'],
-            'resolve' => function ($source) {
-                $ids = get_field('designers', $source->databaseId) ?: [];
-                return array_filter(array_map('get_post', (array) $ids));
-            },
-        ]);
+        $roles = [
+            'designersArtist'     => 'designers_artist',
+            'designersDesigner'   => 'designers_designer',
+            'designersAdaptation' => 'designers_adaptation',
+            'designersSculptor'   => 'designers_sculptor',
+        ];
+
+        foreach ($roles as $graphql_name => $meta_key) {
+            register_graphql_field('Coin', $graphql_name, [
+                'type'    => ['list_of' => 'Designer'],
+                'resolve' => function ($source) use ($meta_key) {
+                    $ids = get_field($meta_key, $source->databaseId) ?: [];
+                    return array_filter(array_map('get_post', (array) $ids));
+                },
+            ]);
+        }
     }
 
     private function registerPriceHistory(): void
