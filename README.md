@@ -43,6 +43,23 @@ wp nbu parse-souvenir --pages=1 --dry-run
 
 ---
 
+## WP-CLI — імпорт історії цін з ua-coins.info
+
+```bash
+# Прев'ю без запису в БД
+wp uacoins import-prices --dry-run
+
+# Одна монета
+wp uacoins import-prices --post_id=169
+
+# Весь каталог coins
+wp uacoins import-prices
+```
+
+Матчить наші `coins`-пости з монетами на ua-coins.info за схожістю назви (кешує в `_uacoins_id`), скрейпить сторінку монети за підписаним посиланням на ціни, пише в CPT `coin_price`. Повна документація джерела, матчингу, збереження і відомих обмежень — `inc/Console/README.md`.
+
+---
+
 ## Дата модель
 
 ### CPT `coins`
@@ -220,8 +237,9 @@ inc/
 │   ├── DesignerGraphQL.php    ← поля на Designer (fullName, note)
 │   ├── CollectionGraphQL.php  ← типи, myCollection/myCollectionStats, addToCollection/updateCollectionItem/deleteCollectionItem
 │   └── AuthGraphQL.php        ← logout
-└── Console/
-    └── FetchNbuDataCommand.php      ← WP-CLI імпортер
+└── Console/                   ← див. inc/Console/README.md
+    ├── FetchNbuDataCommand.php        ← WP-CLI імпортер монет (bank.gov.ua)
+    └── FetchUaCoinsPricesCommand.php  ← WP-CLI імпортер цін (ua-coins.info)
 ```
 
 **Namespace:** `Coins\` → `inc/` (PSR-4, composer autoload)

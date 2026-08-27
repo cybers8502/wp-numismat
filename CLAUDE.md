@@ -14,9 +14,15 @@ wp nbu parse-souvenir --pages=all
 wp nbu parse-souvenir --pages=1-3 --per-page=100
 wp nbu parse-souvenir --pages=1 --per-page=5 --limit=1
 wp nbu parse-souvenir --pages=1 --dry-run   # preview without writing to DB
+
+# Import coin price history from ua-coins.info into the coin_price CPT
+wp uacoins import-prices                    # whole coins catalog
+wp uacoins import-prices --post_id=169      # single coin
+wp uacoins import-prices --dry-run          # preview without writing to DB
+wp uacoins import-prices --rematch --min-score=70
 ```
 
-The `FetchNbuDataCommand` is only registered when `WP_CLI` is defined (see `functions.php`). No manual `require_once` needed — autoloader handles it.
+Both commands are only registered when `WP_CLI` is defined (see `functions.php`). No manual `require_once` needed — autoloader handles it. `FetchUaCoinsPricesCommand` is documented in detail in `inc/Console/README.md` (source, title-matching, storage, known gotchas with the upstream site).
 
 ## Architecture
 
@@ -52,7 +58,7 @@ The `FetchNbuDataCommand` is only registered when `WP_CLI` is defined (see `func
 
 **CPT `designer`** — linked from coins via ACF relationship field (`designers`). ACF fields: `full_name`, `note`.
 
-**CPT `coin_price`** _(admin-only)_ — historical price entries. ACF fields: `coin_id`, `price_date`, `price`, `source`.
+**CPT `coin_price`** _(admin-only)_ — historical price entries. ACF fields: `coin_id`, `price_date`, `price`, `source`. Populated by `wp uacoins import-prices` from ua-coins.info (one post per `coin_id`+`price_date`, deduped) — see `inc/Console/README.md`.
 
 **CPT `coin_collection`** _(admin-only)_ — one post per (user, coin) pair in a user's collection. ACF fields: `user_id`, `coin_id`, `quantity`, `purchase_price`.
 
