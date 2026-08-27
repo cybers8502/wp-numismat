@@ -4,6 +4,11 @@ namespace Coins\GraphQL;
 
 class CoinGraphQL
 {
+    /** Source tag written by wp uacoins import-prices — see Console/FetchUaCoinsPricesCommand.php */
+    private const SOURCE_MARKET = 'ua-coins.info';
+    /** Source tag written by wp nbuarchive import-prices — see Console/ImportNbuArchivePricesCommand.php */
+    private const SOURCE_NBU = 'coins.bank.gov.ua';
+
     public function registerTypes(): void
     {
         $this->registerSharedTypes();
@@ -11,6 +16,7 @@ class CoinGraphQL
         $this->registerGallery();
         $this->registerDesigners();
         $this->registerPriceHistory();
+        $this->registerPriceStats();
     }
 
     private function registerSharedTypes(): void
@@ -31,6 +37,23 @@ class CoinGraphQL
                 'date'   => ['type' => 'String'],
                 'price'  => ['type' => 'Float'],
                 'source' => ['type' => 'String'],
+            ],
+        ]);
+
+        register_graphql_object_type('CoinPriceStats', [
+            'description' => 'Aggregated price-dynamics summary for a coin, computed over its priceHistory',
+            'fields'      => [
+                'latestPrice'    => ['type' => 'Float',  'description' => 'Most recent market price (source: ua-coins.info)'],
+                'latestDate'     => ['type' => 'String', 'description' => 'Date of latestPrice'],
+                'trend'          => ['type' => 'String', 'description' => '"up" | "down" | "flat" — latestPrice vs. the market entry before it'],
+                'nbuPrice'       => ['type' => 'Float',  'description' => 'Most recently known NBU shop price (source: coins.bank.gov.ua). Note: this is the last-scraped snapshot, not necessarily the price at issue date.'],
+                'nbuDate'        => ['type' => 'String', 'description' => 'Date nbuPrice was recorded'],
+                'vsNbuPct'       => ['type' => 'Float',  'description' => '(latestPrice - nbuPrice) / nbuPrice * 100, null if nbuPrice is unknown'],
+                'periodStart'    => ['type' => 'String', 'description' => 'First date within the requested period that has a market price'],
+                'periodEnd'      => ['type' => 'String', 'description' => 'Last date within the requested period that has a market price'],
+                'periodDeltaPct' => ['type' => 'Float',  'description' => 'Change over the period: (last - first) / first * 100'],
+                'periodMin'      => ['type' => 'Float',  'description' => 'Lowest market price within the period'],
+                'periodMax'      => ['type' => 'Float',  'description' => 'Highest market price within the period'],
             ],
         ]);
     }
@@ -96,28 +119,93 @@ class CoinGraphQL
     {
         register_graphql_field('Coin', 'priceHistory', [
             'type'    => ['list_of' => 'CoinPriceEntry'],
-            'resolve' => function ($source) {
-                $query = new \WP_Query([
-                    'post_type'      => 'coin_price',
-                    'post_status'    => 'publish',
-                    'posts_per_page' => -1,
-                    'meta_key'       => 'price_date',
-                    'orderby'        => 'meta_value',
-                    'order'          => 'ASC',
-                    'meta_query'     => [[
-                        'key'   => 'coin_id',
-                        'value' => $source->databaseId,
-                        'type'  => 'NUMERIC',
-                    ]],
-                ]);
+            'resolve' => fn($source) => $this->fetchPriceEntries($source->databaseId),
+        ]);
+    }
 
-                return array_map(fn($post) => [
-                    'id'     => $post->ID,
-                    'date'   => get_field('price_date', $post->ID),
-                    'price'  => (float) get_field('price', $post->ID),
-                    'source' => get_field('source', $post->ID) ?: null,
-                ], $query->posts);
+    private function registerPriceStats(): void
+    {
+        register_graphql_field('Coin', 'priceStats', [
+            'type'    => 'CoinPriceStats',
+            'args'    => [
+                'days' => [
+                    'type'        => 'Int',
+                    'description' => 'Limit the period-based fields (periodStart/End/DeltaPct/Min/Max) to the last N days. Omit for all-time.',
+                ],
+            ],
+            'resolve' => function ($source, $args) {
+                $entries = $this->fetchPriceEntries($source->databaseId);
+
+                $market = array_values(array_filter($entries, fn($e) => $e['source'] === self::SOURCE_MARKET));
+                $nbu    = array_values(array_filter($entries, fn($e) => $e['source'] === self::SOURCE_NBU));
+
+                $latest       = $market ? end($market) : null;
+                $previous     = $latest && count($market) > 1 ? $market[count($market) - 2] : null;
+                $latestPrice  = $latest['price'] ?? null;
+                $nbuLatest    = $nbu ? end($nbu) : null;
+                $nbuPrice     = $nbuLatest['price'] ?? null;
+
+                $trend = null;
+                if ($latest && $previous) {
+                    $trend = match (true) {
+                        $latest['price'] > $previous['price'] => 'up',
+                        $latest['price'] < $previous['price'] => 'down',
+                        default                                => 'flat',
+                    };
+                }
+
+                $period = $market;
+                if (!empty($args['days'])) {
+                    $since  = date('Y-m-d', strtotime(sprintf('-%d days', (int) $args['days'])));
+                    $period = array_values(array_filter($market, fn($e) => $e['date'] >= $since));
+                }
+
+                $periodFirst = $period ? $period[0] : null;
+                $periodLast  = $period ? end($period) : null;
+                $prices      = array_column($period, 'price');
+
+                return [
+                    'latestPrice'    => $latestPrice,
+                    'latestDate'     => $latest['date'] ?? null,
+                    'trend'          => $trend,
+                    'nbuPrice'       => $nbuPrice,
+                    'nbuDate'        => $nbuLatest['date'] ?? null,
+                    'vsNbuPct'       => ($latestPrice !== null && $nbuPrice) ? ($latestPrice - $nbuPrice) / $nbuPrice * 100 : null,
+                    'periodStart'    => $periodFirst['date'] ?? null,
+                    'periodEnd'      => $periodLast['date'] ?? null,
+                    'periodDeltaPct' => ($periodFirst && $periodFirst['price']) ? ($periodLast['price'] - $periodFirst['price']) / $periodFirst['price'] * 100 : null,
+                    'periodMin'      => $prices ? min($prices) : null,
+                    'periodMax'      => $prices ? max($prices) : null,
+                ];
             },
         ]);
+    }
+
+    /**
+     * All coin_price entries for a coin, across every source, ordered by date ASC.
+     * Shared by priceHistory (raw) and priceStats (aggregated).
+     */
+    private function fetchPriceEntries(int $coin_id): array
+    {
+        $query = new \WP_Query([
+            'post_type'      => 'coin_price',
+            'post_status'    => 'publish',
+            'posts_per_page' => -1,
+            'meta_key'       => 'price_date',
+            'orderby'        => 'meta_value',
+            'order'          => 'ASC',
+            'meta_query'     => [[
+                'key'   => 'coin_id',
+                'value' => $coin_id,
+                'type'  => 'NUMERIC',
+            ]],
+        ]);
+
+        return array_map(fn($post) => [
+            'id'     => $post->ID,
+            'date'   => get_field('price_date', $post->ID),
+            'price'  => (float) get_field('price', $post->ID),
+            'source' => get_field('source', $post->ID) ?: null,
+        ], $query->posts);
     }
 }

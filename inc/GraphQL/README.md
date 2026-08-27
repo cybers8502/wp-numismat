@@ -10,7 +10,7 @@
 
 | Клас | Відповідає за |
 |---|---|
-| `CoinGraphQL` | Типи `CoinGalleryImage`/`CoinPriceEntry`; поля на `Coin` (ACF): `issueDate`, `bookletUrl`, `descriptionHtml`, `diameterMm`, `mintageDeclared`, `mintageActual`, `gallery`, `designersArtist/Designer/Adaptation/Sculptor`, `priceHistory` |
+| `CoinGraphQL` | Типи `CoinGalleryImage`/`CoinPriceEntry`/`CoinPriceStats`; поля на `Coin` (ACF): `issueDate`, `bookletUrl`, `descriptionHtml`, `diameterMm`, `mintageDeclared`, `mintageActual`, `gallery`, `designersArtist/Designer/Adaptation/Sculptor`, `priceHistory`, `priceStats(days: Int)` |
 | `DesignerGraphQL` | Поля на `Designer`: `fullName`, `note` |
 | `CollectionGraphQL` | Типи `CollectionItem`/`CollectionStats`/`AddToCollectionPayload`/`DeleteCollectionItemPayload`; queries `myCollection`, `myCollectionStats`; мутації `addToCollection`, `updateCollectionItem`, `deleteCollectionItem` |
 | `AuthGraphQL` | Мутація `logout` (ревокація JWT-секрету). `refreshJwtAuthToken`/`login`/`register` реєструє плагін `wp-graphql-jwt-authentication`, не ця тема |
@@ -36,6 +36,11 @@ query {
       gallery { id url medium }
       designersArtist { title fullName }
       priceHistory { date price source }
+      priceStats(days: 90) {
+        latestPrice latestDate trend
+        nbuPrice nbuDate vsNbuPct
+        periodStart periodEnd periodDeltaPct periodMin periodMax
+      }
     }
   }
 }
@@ -56,6 +61,8 @@ mutation {
 ```
 
 Повний перелік типів/полів дивіться безпосередньо у файлах-реєстраторах — це джерело правди, README тут навмисно не дублює кожне поле.
+
+**`priceStats`**: агрегати над `priceHistory` (останнє значення, тренд, порівняння з НБУ, min/max/дельта за період), рахуються на бекенді з тих самих `coin_price` записів — щоб не дублювати цю логіку на кожному клієнті (сайт, бот). `nbuPrice` — це **остання відома** ціна з джерела `coins.bank.gov.ua` (снепшот на момент запуску `wp nbuarchive import-prices`), а не ціна на дату випуску монети — окремого поля «ціна при випуску» поки немає.
 
 ## Додавання нового типу/поля/query/мутації
 
