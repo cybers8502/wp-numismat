@@ -15,6 +15,7 @@ class App
         $this->bootAdmin();
         $this->bootRestApi();
         $this->bootGraphQL();
+        $this->bootCron();
     }
 
     private function bootAdmin(): void
@@ -46,5 +47,10 @@ class App
         }
 
         (new GraphQL\GraphQLRegistrar())->boot();
+    }
+
+    private function bootCron(): void
+    {
+        (new Cron\DailyImportScheduler())->boot();
     }
 }
