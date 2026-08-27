@@ -20,9 +20,15 @@ wp uacoins import-prices                    # whole coins catalog
 wp uacoins import-prices --post_id=169      # single coin
 wp uacoins import-prices --dry-run          # preview without writing to DB
 wp uacoins import-prices --rematch --min-score=70
+
+# Import prices from a coins.bank.gov.ua (NBU shop archive) JSON dump — that
+# site is behind a JS proof-of-work anti-bot challenge (Bunny Shield), so the
+# data has to be collected via a real browser first, not fetched by this command
+wp nbuarchive import-prices --file=archive.json --dry-run
+wp nbuarchive import-prices --file=archive.json
 ```
 
-Both commands are only registered when `WP_CLI` is defined (see `functions.php`). No manual `require_once` needed — autoloader handles it. `FetchUaCoinsPricesCommand` is documented in detail in `inc/Console/README.md` (source, title-matching, storage, known gotchas with the upstream site).
+All three commands are only registered when `WP_CLI` is defined (see `functions.php`). No manual `require_once` needed — autoloader handles it. `FetchUaCoinsPricesCommand` and `ImportNbuArchivePricesCommand` are documented in detail in `inc/Console/README.md` (sources, title-matching, storage, known gotchas with each upstream site).
 
 ## Architecture
 
@@ -58,7 +64,7 @@ Both commands are only registered when `WP_CLI` is defined (see `functions.php`)
 
 **CPT `designer`** — linked from coins via ACF relationship field (`designers`). ACF fields: `full_name`, `note`.
 
-**CPT `coin_price`** _(admin-only)_ — historical price entries. ACF fields: `coin_id`, `price_date`, `price`, `source`. Populated by `wp uacoins import-prices` from ua-coins.info (one post per `coin_id`+`price_date`, deduped) — see `inc/Console/README.md`.
+**CPT `coin_price`** _(admin-only)_ — historical price entries. ACF fields: `coin_id`, `price_date`, `price`, `source`. Populated by `wp uacoins import-prices` (ua-coins.info) and `wp nbuarchive import-prices` (coins.bank.gov.ua) — one post per `coin_id`+`price_date`+`source`, deduped — see `inc/Console/README.md`.
 
 **CPT `coin_collection`** _(admin-only)_ — one post per (user, coin) pair in a user's collection. ACF fields: `user_id`, `coin_id`, `quantity`, `purchase_price`.
 

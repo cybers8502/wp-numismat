@@ -413,6 +413,10 @@ class FetchUaCoinsPricesCommand
                     'key'   => 'price_date',
                     'value' => $ymd,
                 ],
+                [
+                    'key'   => 'source',
+                    'value' => 'ua-coins.info',
+                ],
             ],
         ]);
 
