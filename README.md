@@ -83,89 +83,13 @@ ACF-поля: `user_id`, `coin_id`, `quantity`, `purchase_price`
 
 ## REST API
 
-Базовий URL: `/wp-json/coins/v1`
-
-### Монети
+Уся дані (монети, колекція) обслуговуються через GraphQL — REST лишився лише для видачі анонімного app-токена, який потрібен, щоб взагалі достукатись до `/graphql` (див. розділ "Захист API" нижче).
 
 | Метод | URL | Auth | Опис |
 |---|---|---|---|
-| `GET` | `/coins` | — | Список монет з фільтрами |
-| `GET` | `/coins/{id}` | — | Одна монета повністю |
-| `GET` | `/coins/{id}/price-history` | — | Історія цін монети |
+| `GET` | `/wp-json/coins/v1/app-token` | — | Видає короткоживий `X-App-Token` |
 
-**GET `/coins` — параметри:**
-
-| Параметр | Тип | За замовч. | Опис |
-|---|---|---|---|
-| `page` | int | `1` | Номер сторінки |
-| `per_page` | int | `20` | Кількість (макс. 100) |
-| `search` | string | — | Повнотекстовий пошук |
-| `orderby` | string | `date` | `date`, `title`, `modified` |
-| `order` | string | `DESC` | `ASC` або `DESC` |
-| `coin_quality` | int\|list | — | Term ID через кому: `?coin_quality=5,6` |
-| `coin_material` | int\|list | — | Term ID |
-| `coin_series` | int\|list | — | Term ID |
-| `coin_color` | int\|list | — | Term ID |
-| `coin_packaging` | int\|list | — | Term ID |
-| `coin_denomination` | int\|list | — | Term ID |
-
-**Відповідь `/coins`:**
-```json
-{
-  "total": 1117,
-  "total_pages": 56,
-  "page": 1,
-  "per_page": 20,
-  "items": [
-    {
-      "id": 123,
-      "title": "Архістратиг Михаїл",
-      "issue_date": "2025-12-29",
-      "thumbnail": "https://...",
-      "taxonomies": { "coin_quality": [...], "coin_material": [...] }
-    }
-  ]
-}
-```
-
-**Відповідь `/coins/{id}`:**
-```json
-{
-  "id": 123,
-  "title": "Архістратиг Михаїл",
-  "issue_date": "2025-12-29",
-  "diameter_mm": 38.6,
-  "mintage_declared": 5000,
-  "mintage_actual": null,
-  "booklet_url": "https://...",
-  "description_html": "<p>...</p>",
-  "designers": [{ "id": 45, "name": "Іваненко І.І." }],
-  "gallery": [{ "id": 78, "url": "https://...", "medium": "https://..." }],
-  "taxonomies": { ... }
-}
-```
-
-### Колекція користувача _(потребує авторизації)_
-
-| Метод | URL | Опис |
-|---|---|---|
-| `GET` | `/collection` | Моя колекція |
-| `POST` | `/collection` | Додати монету |
-| `PATCH` | `/collection/{id}` | Оновити кількість / ціну |
-| `DELETE` | `/collection/{id}` | Видалити монету |
-| `GET` | `/collection/stats` | Статистика колекції |
-
-**POST `/collection` — тіло:**
-```json
-{ "coin_id": 123, "quantity": 2, "purchase_price": 1500 }
-```
-
-**GET `/collection/stats` — відповідь:**
-```json
-{ "unique_coins": 42, "total_quantity": 58, "total_spent": 87500.00 }
-```
-
-Авторизація через WordPress Application Passwords (`Authorization: Basic base64(login:app_password)`).
+Роути `/coins`, `/coins/{id}`, `/coins/{id}/price-history`, `/collection*` існували раніше, але видалені — жоден клієнт (`r-numismat`, `expo-numismat`, telegram-бот) ними не користувався, усі йдуть через GraphQL.
 
 ---
 
@@ -258,17 +182,17 @@ mutation {
 
 ## Захист API від анонімного скрапінгу
 
-Каталог монет лишається доступним без логіну, але прямі HTTP-запити ботів/скраперів блокуються. Захист складається з трьох шарів, застосованих до `/graphql` та `/wp-json/coins/v1/coins*`:
+Каталог монет лишається доступним без логіну, але прямі HTTP-запити ботів/скраперів блокуються. Захист складається з трьох шарів, застосованих до `/graphql` (єдиний ендпоінт з даними — REST лишив тільки видачу токена):
 
 1. **CORS** (`Security\CorsService`) — `Access-Control-Allow-Origin` виставляється лише для origin-ів зі списку `COINS_ALLOWED_ORIGINS` (`.env`, через кому). За замовчуванням — `http://localhost:5173` (dev-сервер `r-numismat`). **Для продакшену обов'язково додати реальний домен фронтенду в `.env`.**
-2. **App-токен** (`Security\AppTokenService` + `Security\ApiGuardService`) — веб-застосунок один раз за сесію викликає `GET /wp-json/coins/v1/app-token`, отримує токен на 45 хв, і передає його в заголовку `X-App-Token` на кожному запиті до `/graphql` та `coins/v1/coins*`. Запити без валідного токена отримують `401`.
+2. **App-токен** (`Security\AppTokenService` + `Security\ApiGuardService`) — веб-застосунок один раз за сесію викликає `GET /wp-json/coins/v1/app-token`, отримує токен на 45 хв, і передає його в заголовку `X-App-Token` на кожному запиті до `/graphql`. Запити без валідного токена отримують `401`.
 3. **Rate limiting** (`Security\RateLimiter`) — по IP, окремо для видачі токена (10/хв) і для захищених ендпоінтів (60/хв). Перевищення — `429`.
 
 Запити з заголовком `Authorization` (JWT / Application Passwords) пропускаються без app-токена — залогінений користувач уже підтвердив особу сильнішим механізмом.
 
 **Важливо:** ці механізми не дають криптографічної гарантії — вони підіймають вартість скрапінгу (Origin-перевірка, дворівневий флоу, rate limit), а не унеможливлюють його повністю. Для протидії вмотивованому скраперу з headless-браузером потрібен захист на рівні edge (Cloudflare bot management тощо).
 
-**Frontend TODO:** `r-numismat` (і будь-який інший клієнт) має отримати токен через `GET /coins/v1/app-token` і передавати `X-App-Token` у кожному GraphQL-запиті — інакше після деплою цих змін каталог перестане відповідати.
+`r-numismat` вже реалізує цей флоу (`src/lib/appToken.ts` + Apollo-лінки в `src/lib/apollo.ts`) — будь-який новий клієнт має зробити те саме: отримати токен через `GET /coins/v1/app-token` і передавати `X-App-Token` у кожному GraphQL-запиті.
 
 ---
 
@@ -283,16 +207,13 @@ inc/
 ├── Assets/AssetManager.php
 ├── Security/
 │   ├── CorsService.php        ← CORS allowlist (COINS_ALLOWED_ORIGINS)
-│   ├── ApiGuardService.php    ← app-token + rate limit gate на /graphql та coins/v1/coins*
+│   ├── ApiGuardService.php    ← app-token + rate limit gate на /graphql
 │   ├── AppTokenService.php    ← видача/валідація анонімних app-токенів
 │   └── RateLimiter.php        ← generic per-key rate limiter (transient-based)
-├── Rest/
+├── Rest/                      ← див. inc/Rest/README.md
 │   ├── ApiRouter.php
 │   └── Controllers/
-│       ├── CoinController.php
-│       ├── CoinPriceController.php
-│       ├── CoinCollectionController.php
-│       └── AppTokenController.php   ← GET /app-token
+│       └── AppTokenController.php   ← GET /app-token (єдиний REST-роут)
 ├── GraphQL/
 │   ├── GraphQLRegistrar.php   ← оркестратор
 │   ├── CoinGraphQL.php        ← типи CoinGalleryImage/CoinPriceEntry, поля на Coin, gallery, designers, priceHistory
@@ -305,20 +226,12 @@ inc/
 
 **Namespace:** `Coins\` → `inc/` (PSR-4, composer autoload)
 
-### Додати новий REST ендпоінт
+### REST і GraphQL
 
-1. Створити контролер в `inc/Rest/Controllers/` з namespace `Coins\Rest\Controllers\`
-2. Зареєструвати маршрут в `ApiRouter::registerRoutes()`
+Детальна документація кожного шару — в `inc/Rest/README.md` та `inc/GraphQL/README.md` (як додати роут/тип/мутацію, конвенції, приклади).
 
 ### Додати новий CPT або таксономію
 
 1. Створити реєстратор в `inc/Admin/PostTypes/` з методом `boot()`
 2. Створити ACF-менеджер в `inc/Admin/ACFFieldsManager/`
 3. Підключити обидва в `App::bootAdmin()`
-
-### Додати GraphQL поля/типи/мутації
-
-Структура плоска — один клас на предметну область (`Coin`, `Designer`, `Collection`, `Auth`), а не окремі класи на тип/поле/query/mutation. Кожен клас реалізує `registerTypes(): void`, всередині якого приватні методи реєструють типи (`registerSharedTypes`), поля/queries/мутації, а резолвери — публічні методи цього ж класу (`resolveX`), на які посилаються через `[$this, 'resolveX']`.
-
-- Розширити існуючу область → додати метод у відповідний `*GraphQL.php`
-- Нова предметна область → створити `inc/GraphQL/NewDomainGraphQL.php` з методом `registerTypes()`, підключити викликом `(new NewDomainGraphQL())->registerTypes()` в `GraphQLRegistrar::register()`

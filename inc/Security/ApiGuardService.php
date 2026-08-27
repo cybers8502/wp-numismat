@@ -7,9 +7,7 @@ use WP_REST_Request;
 
 class ApiGuardService
 {
-    // GET /coins/v1/coins, /coins/v1/coins/{id}, /coins/v1/coins/{id}/price-history
-    private const GUARDED_REST_PATTERN = '#^/coins/v1/coins(/\d+(/price-history)?)?$#';
-
+    // All catalog/collection data is served over GraphQL — this is the only route to guard.
     private const GUARDED_GRAPHQL_ROUTE = '/graphql';
 
     public function __construct()
@@ -23,11 +21,7 @@ class ApiGuardService
             return $result;
         }
 
-        $route = $request->get_route();
-        $isGuardedGraphQL = $route === self::GUARDED_GRAPHQL_ROUTE;
-        $isGuardedRest    = preg_match(self::GUARDED_REST_PATTERN, $route) === 1;
-
-        if (!$isGuardedGraphQL && !$isGuardedRest) {
+        if ($request->get_route() !== self::GUARDED_GRAPHQL_ROUTE) {
             return $result;
         }
 

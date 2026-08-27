@@ -27,7 +27,7 @@ The `FetchNbuDataCommand` is only registered when `WP_CLI` is defined (see `func
 **`App::boot()` wires up:**
 - `Assets\AssetManager` — enqueue scripts/styles
 - `Security\CorsService` — CORS headers for REST/GraphQL, allowlist from `COINS_ALLOWED_ORIGINS` env var (default: `http://localhost:5173`)
-- `Security\ApiGuardService` — anon app-token + rate-limit gate on `/graphql` and `coins/v1/coins*`
+- `Security\ApiGuardService` — anon app-token + rate-limit gate on `/graphql`
 - `Admin\ThemeSetupService` — theme support (post-thumbnails)
 - `Admin\AdminMenuManager` — WP admin menu customization
 - `Admin\PostTypes\CoinPostTypeRegistrar` — registers `coins` CPT + coin taxonomies
@@ -56,15 +56,9 @@ The `FetchNbuDataCommand` is only registered when `WP_CLI` is defined (see `func
 
 **CPT `coin_collection`** _(admin-only)_ — one post per (user, coin) pair in a user's collection. ACF fields: `user_id`, `coin_id`, `quantity`, `purchase_price`.
 
-## Two parallel APIs: REST and GraphQL
+## REST vs GraphQL
 
-Both APIs expose the same underlying data (coins, coin details, price history, and per-user collection CRUD). They are maintained in parallel — a `coins/v1` REST endpoint and its GraphQL equivalent should generally be added/changed together. See `README.md` for the full endpoint/query/mutation reference and request/response shapes.
-
-### REST (`inc/Rest/`)
-
-Register routes inside `ApiRouter::registerRoutes()` using `register_rest_route()`.
-
-If a new controller class is needed, add it to `inc/Rest/Controllers/` under namespace `Coins\Rest\Controllers\` — autoloader picks it up automatically. Collection endpoints require `is_user_logged_in()` and authorize per-item access by comparing the `coin_collection` post's `user_id` ACF field to `get_current_user_id()` (see `CoinCollectionController::authorizeItem()`).
+GraphQL (`inc/GraphQL/`) is the sole data API — coins, coin details, price history, per-user collection CRUD. REST (`inc/Rest/`) only issues the anonymous app-token needed to call GraphQL (see below); it used to also expose `coins/v1/coins*` and `coins/v1/collection*` routes, but those were deleted (no known consumer — every client, including `expo-numismat` and the Telegram bot, only ever called GraphQL). Detailed per-layer docs: `inc/Rest/README.md`, `inc/GraphQL/README.md`.
 
 ### GraphQL (`inc/GraphQL/`)
 
@@ -76,20 +70,24 @@ Registered from `GraphQLRegistrar::register()`, hooked on `graphql_register_type
 - `CollectionGraphQL` — object types `CollectionItem`/`CollectionStats`/`AddToCollectionPayload`/`DeleteCollectionItemPayload`; root queries `myCollection`, `myCollectionStats`; mutations `addToCollection`, `updateCollectionItem`, `deleteCollectionItem`
 - `AuthGraphQL` — mutation `logout` (JWT secret revocation; `refreshJwtAuthToken` comes from the wp-graphql-jwt-authentication plugin, not this theme)
 
-Collection mutations/queries throw `\GraphQL\Error\UserError` for auth/ownership failures (mirrors the REST controller's `authorizeItem()` check: logged in + `coin_collection.user_id` must match the current user).
+Collection mutations/queries throw `\GraphQL\Error\UserError` for auth/ownership failures (logged in + `coin_collection.user_id` must match the current user — see `CollectionGraphQL::authorizeItem()`).
 
 To add a new registrar: create `inc/GraphQL/NewDomainGraphQL.php` with a `registerTypes()` method, then instantiate it and call `->registerTypes()` inside `GraphQLRegistrar::register()`. Prefer extending an existing domain class over creating a new one for closely related fields/queries/mutations (e.g. a new field on `Coin` goes in `CoinGraphQL`, not a new file).
 
+### REST (`inc/Rest/`)
+
+Just `ApiRouter` + `Controllers\AppTokenController`, registering `GET coins/v1/app-token`. Only add a new REST route here if it genuinely can't be a GraphQL field/query/mutation (e.g. it must run outside the GraphQL schema, like the app-token endpoint itself).
+
 ## API access control (anti-scraping, not auth)
 
-Goal: keep the catalog browsable without login, but make it costly for anonymous bots/scrapers to hit `/graphql` and `coins/v1/coins*` directly. This is **not** a hard security boundary — see `README.md`'s "Захист API від анонімного скрапінгу" section for the full rationale and tradeoffs.
+Goal: keep the catalog browsable without login, but make it costly for anonymous bots/scrapers to hit `/graphql` directly. This is **not** a hard security boundary — see `README.md`'s "Захист API від анонімного скрапінгу" section for the full rationale and tradeoffs.
 
 - `Security\CorsService` — only echoes `Access-Control-Allow-Origin` for origins in `COINS_ALLOWED_ORIGINS` (comma-separated env var; falls back to the `r-numismat` dev origin `http://localhost:5173`). **Set this in production `.env` or the real frontend domain gets silently CORS-blocked.**
 - `Security\AppTokenService` — issues/validates short-lived (45 min) anonymous tokens via WP transients. Not a secret in any cryptographic sense (visible in browser devtools) — it just enforces a two-step flow.
-- `Security\ApiGuardService` — hooked on `rest_pre_dispatch`; for unauthenticated requests to `/graphql` or `coins/v1/coins*` (i.e. no `Authorization` header — real logged-in users are exempt), requires a valid `X-App-Token` header and enforces per-IP rate limits (`Security\RateLimiter`, transient-based). Returns `401 missing_app_token` / `429 rate_limited` on failure.
+- `Security\ApiGuardService` — hooked on `rest_pre_dispatch`; for unauthenticated requests to `/graphql` (i.e. no `Authorization` header — real logged-in users/bots are exempt), requires a valid `X-App-Token` header and enforces per-IP rate limits (`Security\RateLimiter`, transient-based). Returns `401 missing_app_token` / `429 rate_limited` on failure.
 - `Rest\Controllers\AppTokenController` — `GET /coins/v1/app-token`, itself rate-limited (10/min/IP), returns `{ token, expires_in }`.
 
-**Any frontend calling `/graphql` or the guarded REST routes must fetch a token first and send it as `X-App-Token` on every request** — this includes `r-numismat`, which was not updated as part of this change (BE-only). Adding a new guarded route: extend `ApiGuardService::GUARDED_REST_PATTERN`.
+**Every anonymous GraphQL caller must fetch a token first and send it as `X-App-Token` on every request** — `r-numismat` implements this (`src/lib/appToken.ts` + Apollo links in `src/lib/apollo.ts`). `node-coin-telegram-bot`'s unauthenticated catalog calls (`searchCoins`, `getCoinDetails`, `getPriceHistory`, `getCoinGallery` in `app/api.js`) do **not** yet — they will start failing with `401` once this deploys, until updated the same way. Its authenticated calls (`getCollection`, `addToCollection`, etc., which already send `Authorization: Bearer`) are unaffected.
 
 ## Adding New Post Types or ACF Fields
 

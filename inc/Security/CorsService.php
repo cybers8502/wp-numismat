@@ -14,7 +14,7 @@ class CorsService
 
         if ($origin && in_array($origin, $this->allowedOrigins(), true)) {
             header("Access-Control-Allow-Origin: $origin");
-            header('Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS');
+            header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
             header('Access-Control-Allow-Credentials: true');
             header('Access-Control-Allow-Headers: Authorization, Content-Type, X-WP-Nonce, X-App-Token');
         }
