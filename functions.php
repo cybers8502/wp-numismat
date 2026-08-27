@@ -35,4 +35,5 @@ add_filter('determine_current_user', function ($user_id) {
 
 if (defined('WP_CLI') && WP_CLI) {
     \Coins\Console\FetchNbuDataCommand::register();
+    \Coins\Console\FetchUaCoinsPricesCommand::register();
 }
