@@ -215,6 +215,7 @@ query {
 ```graphql
 query {
   myCollection {
+    id
     coinId
     coinTitle
     coinThumbnail
@@ -228,7 +229,46 @@ query {
     totalSpent
   }
 }
+
+mutation {
+  addToCollection(input: { coinId: 123 }) {
+    success
+  }
+}
+
+mutation {
+  updateCollectionItem(input: { id: 45, quantity: 3, purchasePrice: 1500 }) {
+    item {
+      id
+      quantity
+      purchasePrice
+    }
+  }
+}
+
+mutation {
+  deleteCollectionItem(input: { id: 45 }) {
+    success
+    id
+  }
+}
 ```
+
+---
+
+## Захист API від анонімного скрапінгу
+
+Каталог монет лишається доступним без логіну, але прямі HTTP-запити ботів/скраперів блокуються. Захист складається з трьох шарів, застосованих до `/graphql` та `/wp-json/coins/v1/coins*`:
+
+1. **CORS** (`Security\CorsService`) — `Access-Control-Allow-Origin` виставляється лише для origin-ів зі списку `COINS_ALLOWED_ORIGINS` (`.env`, через кому). За замовчуванням — `http://localhost:5173` (dev-сервер `r-numismat`). **Для продакшену обов'язково додати реальний домен фронтенду в `.env`.**
+2. **App-токен** (`Security\AppTokenService` + `Security\ApiGuardService`) — веб-застосунок один раз за сесію викликає `GET /wp-json/coins/v1/app-token`, отримує токен на 45 хв, і передає його в заголовку `X-App-Token` на кожному запиті до `/graphql` та `coins/v1/coins*`. Запити без валідного токена отримують `401`.
+3. **Rate limiting** (`Security\RateLimiter`) — по IP, окремо для видачі токена (10/хв) і для захищених ендпоінтів (60/хв). Перевищення — `429`.
+
+Запити з заголовком `Authorization` (JWT / Application Passwords) пропускаються без app-токена — залогінений користувач уже підтвердив особу сильнішим механізмом.
+
+**Важливо:** ці механізми не дають криптографічної гарантії — вони підіймають вартість скрапінгу (Origin-перевірка, дворівневий флоу, rate limit), а не унеможливлюють його повністю. Для протидії вмотивованому скраперу з headless-браузером потрібен захист на рівні edge (Cloudflare bot management тощо).
+
+**Frontend TODO:** `r-numismat` (і будь-який інший клієнт) має отримати токен через `GET /coins/v1/app-token` і передавати `X-App-Token` у кожному GraphQL-запиті — інакше після деплою цих змін каталог перестане відповідати.
 
 ---
 
@@ -241,19 +281,24 @@ inc/
 │   ├── PostTypes/                   ← реєстрація CPT
 │   └── ACFFieldsManager/            ← ACF field groups
 ├── Assets/AssetManager.php
-├── Security/CorsService.php
+├── Security/
+│   ├── CorsService.php        ← CORS allowlist (COINS_ALLOWED_ORIGINS)
+│   ├── ApiGuardService.php    ← app-token + rate limit gate на /graphql та coins/v1/coins*
+│   ├── AppTokenService.php    ← видача/валідація анонімних app-токенів
+│   └── RateLimiter.php        ← generic per-key rate limiter (transient-based)
 ├── Rest/
 │   ├── ApiRouter.php
 │   └── Controllers/
 │       ├── CoinController.php
 │       ├── CoinPriceController.php
-│       └── CoinCollectionController.php
+│       ├── CoinCollectionController.php
+│       └── AppTokenController.php   ← GET /app-token
 ├── GraphQL/
-│   ├── GraphQLRegistrar.php         ← оркестратор
-│   ├── CustomTypesRegistrar.php
-│   ├── CoinFieldsRegistrar.php
-│   ├── DesignerFieldsRegistrar.php
-│   └── CollectionQueriesRegistrar.php
+│   ├── GraphQLRegistrar.php   ← оркестратор
+│   ├── CoinGraphQL.php        ← типи CoinGalleryImage/CoinPriceEntry, поля на Coin, gallery, designers, priceHistory
+│   ├── DesignerGraphQL.php    ← поля на Designer (fullName, note)
+│   ├── CollectionGraphQL.php  ← типи, myCollection/myCollectionStats, addToCollection/updateCollectionItem/deleteCollectionItem
+│   └── AuthGraphQL.php        ← logout
 └── Console/
     └── FetchNbuDataCommand.php      ← WP-CLI імпортер
 ```
@@ -271,8 +316,9 @@ inc/
 2. Створити ACF-менеджер в `inc/Admin/ACFFieldsManager/`
 3. Підключити обидва в `App::bootAdmin()`
 
-### Додати GraphQL поля/типи
+### Додати GraphQL поля/типи/мутації
 
-- Нові типи → `CustomTypesRegistrar::register()`
-- Нові поля на `Coin` → `CoinFieldsRegistrar`
-- Нові root queries → `CollectionQueriesRegistrar` або новий клас у `inc/GraphQL/`
+Структура плоска — один клас на предметну область (`Coin`, `Designer`, `Collection`, `Auth`), а не окремі класи на тип/поле/query/mutation. Кожен клас реалізує `registerTypes(): void`, всередині якого приватні методи реєструють типи (`registerSharedTypes`), поля/queries/мутації, а резолвери — публічні методи цього ж класу (`resolveX`), на які посилаються через `[$this, 'resolveX']`.
+
+- Розширити існуючу область → додати метод у відповідний `*GraphQL.php`
+- Нова предметна область → створити `inc/GraphQL/NewDomainGraphQL.php` з методом `registerTypes()`, підключити викликом `(new NewDomainGraphQL())->registerTypes()` в `GraphQLRegistrar::register()`

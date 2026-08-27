@@ -10,20 +10,24 @@ class CorsService
 
     public function handleCors(): void
     {
-
         $origin = get_http_origin();
 
-        $allowed = [
-            'https://brutmaps.com',
-            'https://brutmapsdev.cybers.pro',
-            'http://localhost:3033',
-        ];
-
-        if (in_array($origin, $allowed)) {
+        if ($origin && in_array($origin, $this->allowedOrigins(), true)) {
             header("Access-Control-Allow-Origin: $origin");
-            header('Access-Control-Allow-Methods: POST, OPTIONS');
+            header('Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS');
             header('Access-Control-Allow-Credentials: true');
-            header('Access-Control-Allow-Headers: Authorization, Content-Type, X-WP-Nonce');
+            header('Access-Control-Allow-Headers: Authorization, Content-Type, X-WP-Nonce, X-App-Token');
         }
+    }
+
+    private function allowedOrigins(): array
+    {
+        $configured = getenv('COINS_ALLOWED_ORIGINS');
+
+        if ($configured) {
+            return array_map('trim', explode(',', $configured));
+        }
+
+        return ['http://localhost:5173'];
     }
 }

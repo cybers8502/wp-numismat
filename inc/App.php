@@ -10,6 +10,7 @@ class App
         new Assets\AssetManager();
 
         new Security\CorsService();
+        new Security\ApiGuardService();
 
         $this->bootAdmin();
         $this->bootRestApi();

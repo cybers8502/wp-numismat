@@ -1,10 +1,10 @@
 <?php
 
-namespace Coins\GraphQL\Fields;
+namespace Coins\GraphQL;
 
-class DesignerFieldsRegistrar
+class DesignerGraphQL
 {
-    public function register(): void
+    public function registerTypes(): void
     {
         register_graphql_field('Designer', 'fullName', [
             'type'    => 'String',

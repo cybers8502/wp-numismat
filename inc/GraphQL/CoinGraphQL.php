@@ -1,15 +1,38 @@
 <?php
 
-namespace Coins\GraphQL\Fields;
+namespace Coins\GraphQL;
 
-class CoinFieldsRegistrar
+class CoinGraphQL
 {
-    public function register(): void
+    public function registerTypes(): void
     {
+        $this->registerSharedTypes();
         $this->registerAcfFields();
         $this->registerGallery();
         $this->registerDesigners();
         $this->registerPriceHistory();
+    }
+
+    private function registerSharedTypes(): void
+    {
+        register_graphql_object_type('CoinGalleryImage', [
+            'description' => 'Gallery image of a coin',
+            'fields'      => [
+                'id'     => ['type' => 'Int',    'description' => 'Attachment ID'],
+                'url'    => ['type' => 'String', 'description' => 'Full-size URL'],
+                'medium' => ['type' => 'String', 'description' => 'Medium-size URL'],
+            ],
+        ]);
+
+        register_graphql_object_type('CoinPriceEntry', [
+            'description' => 'Historical price entry for a coin',
+            'fields'      => [
+                'id'     => ['type' => 'Int'],
+                'date'   => ['type' => 'String'],
+                'price'  => ['type' => 'Float'],
+                'source' => ['type' => 'String'],
+            ],
+        ]);
     }
 
     private function registerAcfFields(): void

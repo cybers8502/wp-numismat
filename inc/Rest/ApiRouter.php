@@ -15,6 +15,15 @@ class ApiRouter
         $coinController       = new Controllers\CoinController();
         $priceController      = new Controllers\CoinPriceController();
         $collectionController = new Controllers\CoinCollectionController();
+        $appTokenController   = new Controllers\AppTokenController();
+
+        // Anon app token — required (via X-App-Token header) to call the guarded
+        // catalog endpoints below and /graphql. See Security\ApiGuardService.
+        register_rest_route('coins/v1', '/app-token', [
+            'methods'             => 'GET',
+            'callback'            => [$appTokenController, 'issue'],
+            'permission_callback' => '__return_true',
+        ]);
 
         // Coins list
         register_rest_route('coins/v1', '/coins', [
