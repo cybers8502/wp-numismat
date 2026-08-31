@@ -2,6 +2,8 @@
 
 namespace Coins\GraphQL;
 
+use Coins\Prices\PriceRepository;
+
 class CoinGraphQL
 {
     /** Source tag written by wp uacoins import-prices — see Console/FetchUaCoinsPricesCommand.php */
@@ -182,30 +184,14 @@ class CoinGraphQL
     }
 
     /**
-     * All coin_price entries for a coin, across every source, ordered by date ASC.
+     * All price entries for a coin, across every source, ordered by date ASC.
      * Shared by priceHistory (raw) and priceStats (aggregated).
+     *
+     * Reads the custom {prefix}coin_prices table (indexed, one row per point)
+     * — the coin_price CPT this used to query was retired in migration phase 6.
      */
     private function fetchPriceEntries(int $coin_id): array
     {
-        $query = new \WP_Query([
-            'post_type'      => 'coin_price',
-            'post_status'    => 'publish',
-            'posts_per_page' => -1,
-            'meta_key'       => 'price_date',
-            'orderby'        => 'meta_value',
-            'order'          => 'ASC',
-            'meta_query'     => [[
-                'key'   => 'coin_id',
-                'value' => $coin_id,
-                'type'  => 'NUMERIC',
-            ]],
-        ]);
-
-        return array_map(fn($post) => [
-            'id'     => $post->ID,
-            'date'   => get_field('price_date', $post->ID),
-            'price'  => (float) get_field('price', $post->ID),
-            'source' => get_field('source', $post->ID) ?: null,
-        ], $query->posts);
+        return (new PriceRepository())->forCoin($coin_id);
     }
 }

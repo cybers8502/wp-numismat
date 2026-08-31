@@ -5,10 +5,12 @@
 | Команда | Джерело | Що пише |
 |---|---|---|
 | `wp nbu parse-souvenir` | bank.gov.ua | CPT `coins` (самі монети, картинки, дизайнери) |
-| `wp uacoins import-prices` | ua-coins.info | CPT `coin_price`, `source=ua-coins.info` (щоденна історія цін) |
-| `wp nbuarchive import-prices` | coins.bank.gov.ua (архів магазину НБУ) | CPT `coin_price`, `source=coins.bank.gov.ua` (одна "остання відома" ціна) |
+| `wp uacoins import-prices` | ua-coins.info | таблиця `{prefix}coin_prices`, `source=ua-coins.info` (щоденна історія цін) |
+| `wp nbuarchive import-prices` | coins.bank.gov.ua (архів магазину НБУ) | таблиця `{prefix}coin_prices`, `source=coins.bank.gov.ua` (одна "остання відома" ціна) |
 
 Цей файл — про обидва цінові.
+
+**ua-coins.info має ще один імпортер — окремий Node-сервіс `node-coins-price-parser`** (не в цьому репо, пише в ту саму БД напряму через `mysql2`, без участі WordPress). Він з'явився в migration phase 5 і покриває те саме джерело тим самим алгоритмом матчингу (навіть той самий `--min-score=55` — `similar_text()` там побайтовий порт PHP-версії). `wp uacoins import-prices` лишається робочим — обидва інструменти пишуть в одну таблицю й діляться кешем матчів (постмета `_uacoins_id`/`_uacoins_slug`/`_uacoins_match_score` на `coins`-постах), тож який запускати — байдуже.
 
 ---
 
@@ -61,22 +63,23 @@
 
 ### Де зберігаємо (спільно для обох джерел)
 
-CPT `coin_price` (адмінка, не публічний), ACF-поля:
+Таблиця `{prefix}coin_prices` (`Coins\Prices\PriceSchema`/`PriceRepository`, `inc/Prices/`) — до migration phase 1-2 це був CPT `coin_price` з ACF-полями; той CPT видалений разом з усіма постами в phase 6 (2026-08-30), таблиця — єдине сховище цін відтоді.
 
-| Поле (ACF name) | ACF key | Тип | Значення |
-|---|---|---|---|
-| `coin_id` | `field_cp_coin` | post_object → `coins` | ID нашої монети |
-| `price_date` | `field_cp_date` | date_picker | Дата фіксації ціни (в БД зберігається як `Ymd`, без роздільників — ACF-конвенція для date_picker) |
-| `price` | `field_cp_price` | number | Ціна в гривнях |
-| `source` | `field_cp_source` | text | `ua-coins.info` або `coins.bank.gov.ua`, залежно від імпортера |
+| Колонка | Тип | Значення |
+|---|---|---|
+| `coin_id` | bigint | ID нашої монети (`coins`-пост) |
+| `price_date` | date | Дата фіксації ціни (`Y-m-d`) |
+| `price` | decimal(12,2) | Ціна в гривнях |
+| `source` | varchar(32) | `ua-coins.info` або `coins.bank.gov.ua`, залежно від імпортера |
+| `sku` | varchar(32) | Артикул товару НБУ, якщо переданий (порожній рядок інакше) |
 
-Для `coins.bank.gov.ua` немає точної дати ціни (лише "станом на дату останньої реалізації") — імпортер підставляє дату запуску команди (`--price-date`, за замовчуванням сьогодні). Артикул товару НБУ (`sku`), якщо переданий, лягає в postmeta `_nbu_archive_sku` price-поста (довідково, не ACF-поле).
+Для `coins.bank.gov.ua` немає точної дати ціни (лише "станом на дату останньої реалізації") — імпортер підставляє дату запуску команди (`--price-date`, за замовчуванням сьогодні).
 
-**Дедуплікація**: один запис на трійку `(coin_id, price_date, source)` — саме з `source` у ключі, інакше при накладенні дат від двох джерел один імпортер тихо перезаписав би ціну іншого в тому самому пості. Перед створенням команда шукає існуючий `coin_price`-пост через `WP_Query` з `meta_query` по всіх трьох полях — якщо є, оновлює його замість дубля. Повторний запуск на тих самих даних — безпечний (idempotent).
+**Дедуплікація**: `UNIQUE (coin_id, source, price_date)` на рівні схеми — саме з `source` у ключі, інакше при накладенні дат від двох джерел один імпортер тихо перезаписав би ціну іншого. Запис — `INSERT ... ON DUPLICATE KEY UPDATE`, батчами; повторний запуск на тих самих даних безпечний (idempotent).
 
 ## Як віддаємо назовні
 
-GraphQL-поле `Coin.priceHistory` (`inc/GraphQL/CoinGraphQL.php`) — `WP_Query` по `coin_price` з `meta_query` на `coin_id` і `orderby=meta_value` по `price_date`, повертає записи з обох джерел разом (поле `source` дозволяє розрізнити на фронті). Працює нормально для **однієї монети за раз** (сторінка монети, графік динаміки ціни). Не запитувати `priceHistory` всередині спискового запиту монет (каталог) — `meta_query`/`orderby` там неіндексовані, для N монет одночасно це буде повільно.
+GraphQL-поле `Coin.priceHistory` (`inc/GraphQL/CoinGraphQL.php`) → `PriceRepository::forCoin()` — індексований запит по `(coin_id, price_date)`, повертає записи з обох джерел разом (поле `source` дозволяє розрізнити на фронті). Достатньо швидкий і для одиничного запиту (сторінка монети), і — на відміну від старого CPT-варіанту — для списків, якщо колись знадобиться (`PriceRepository::forCoins()`).
 
 ## Запуск
 

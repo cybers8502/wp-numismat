@@ -2,6 +2,8 @@
 
 namespace Coins\Console;
 
+use Coins\Prices\PriceRepository;
+use Coins\Prices\PriceSchema;
 use WP_CLI;
 use WP_Query;
 use WP_Error;
@@ -55,13 +57,13 @@ class FetchUaCoinsPricesCommand
 
     const BASE        = 'https://www.ua-coins.info';
     const SEARCH_PATH  = '/ua/search';
+    const SOURCE       = 'ua-coins.info';
 
     // /coin/prices/{id} 403-ить без Referer + браузерного User-Agent (Cloudflare/WAF
     // блокує запити з нетиповим UA навіть із дійсним підписаним посиланням).
     const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-    protected $post_type       = 'coins';
-    protected $price_post_type = 'coin_price';
+    protected $post_type = 'coins';
 
     /**
      * @when after_wp_load
@@ -72,6 +74,10 @@ class FetchUaCoinsPricesCommand
         $rematch   = isset($assoc_args['rematch']);
         $min_score = isset($assoc_args['min-score']) ? (float) $assoc_args['min-score'] : 55.0;
         $limit     = isset($assoc_args['limit']) ? max(1, (int) $assoc_args['limit']) : null;
+
+        if (!$dry_run) {
+            PriceSchema::install();
+        }
 
         if (isset($assoc_args['post_id'])) {
             $post_ids = [(int) $assoc_args['post_id']];
@@ -94,11 +100,10 @@ class FetchUaCoinsPricesCommand
         WP_CLI::log(sprintf('Монет до обробки: %d%s', count($post_ids), $dry_run ? ' [DRY RUN]' : ''));
 
         $stats = [
-            'matched'          => 0,
-            'skipped_no_match' => 0,
-            'prices_created'   => 0,
-            'prices_updated'   => 0,
-            'errors'           => 0,
+            'matched'           => 0,
+            'skipped_no_match'  => 0,
+            'prices_table_rows' => 0,
+            'errors'            => 0,
         ];
 
         foreach ($post_ids as $post_id) {
@@ -142,34 +147,52 @@ class FetchUaCoinsPricesCommand
             WP_CLI::log('  Знайдено записів цін: ' . count($prices));
 
             if (!$dry_run) {
-                foreach ($prices as $entry) {
-                    $date  = $entry['date'] ?? null;
-                    $price = $entry['price'] ?? null;
-                    if (!$date || $price === null) {
-                        continue;
-                    }
-
-                    $result = $this->upsert_price($post_id, $date, (float) $price);
-                    if ($result === 'created') {
-                        $stats['prices_created']++;
-                    } else {
-                        $stats['prices_updated']++;
-                    }
-                }
+                $this->store_prices($post_id, $prices, $stats);
             }
 
             $stats['matched']++;
         }
 
         WP_CLI::success(sprintf(
-            'Готово. Монет зі співпадінням: %d, без співпадіння: %d, цін створено: %d, оновлено: %d, помилок: %d%s',
+            'Готово. Монет зі співпадінням: %d, без співпадіння: %d, рядків у таблиці цін: %d, помилок: %d%s',
             $stats['matched'],
             $stats['skipped_no_match'],
-            $stats['prices_created'],
-            $stats['prices_updated'],
+            $stats['prices_table_rows'],
             $stats['errors'],
             $dry_run ? ' [DRY RUN]' : ''
         ));
+    }
+
+    /**
+     * Writes a coin's price points to the custom {prefix}coin_prices table.
+     * Mutates $stats by reference.
+     *
+     * @param array<int,array{date?:string,price?:mixed}> $prices
+     * @param array<string,int>                           $stats
+     */
+    protected function store_prices(int $coin_post_id, array $prices, array &$stats): void
+    {
+        $rows = [];
+
+        foreach ($prices as $entry) {
+            $date  = $entry['date'] ?? null;
+            $price = $entry['price'] ?? null;
+            if (!$date || $price === null) {
+                continue;
+            }
+
+            $rows[] = [
+                'coin_id'    => $coin_post_id,
+                'source'     => self::SOURCE,
+                'price_date' => $date,
+                'price'      => (float) $price,
+            ];
+        }
+
+        if ($rows) {
+            (new PriceRepository())->upsertBatch($rows);
+            $stats['prices_table_rows'] += count($rows);
+        }
     }
 
     /** ----------------------- MATCHING ----------------------- */
@@ -391,59 +414,5 @@ class FetchUaCoinsPricesCommand
         }
 
         return $data;
-    }
-
-    /** ----------------------- WP CRUD ----------------------- */
-
-    protected function upsert_price(int $coin_post_id, string $date, float $price): string
-    {
-        $ymd = str_replace('-', '', $date); // ACF date_picker зберігає у форматі Ymd
-
-        $q = new WP_Query([
-            'post_type'      => $this->price_post_type,
-            'post_status'    => 'any',
-            'posts_per_page' => 1,
-            'fields'         => 'ids',
-            'meta_query'     => [
-                [
-                    'key'   => 'coin_id',
-                    'value' => $coin_post_id,
-                ],
-                [
-                    'key'   => 'price_date',
-                    'value' => $ymd,
-                ],
-                [
-                    'key'   => 'source',
-                    'value' => 'ua-coins.info',
-                ],
-            ],
-        ]);
-
-        $existing = !empty($q->posts) ? (int) $q->posts[0] : null;
-
-        if ($existing) {
-            $price_post_id = $existing;
-        } else {
-            $created = wp_insert_post([
-                'post_type'   => $this->price_post_type,
-                'post_status' => 'publish',
-                'post_title'  => sprintf('%s — %s', get_the_title($coin_post_id), $date),
-            ]);
-
-            if (is_wp_error($created)) {
-                WP_CLI::warning('  Не вдалось створити coin_price: ' . $created->get_error_message());
-                return 'updated';
-            }
-
-            $price_post_id = (int) $created;
-        }
-
-        update_field('field_cp_coin', $coin_post_id, $price_post_id);
-        update_field('field_cp_date', $ymd, $price_post_id);
-        update_field('field_cp_price', $price, $price_post_id);
-        update_field('field_cp_source', 'ua-coins.info', $price_post_id);
-
-        return $existing ? 'updated' : 'created';
     }
 }

@@ -26,12 +26,10 @@ class App
 
         (new Admin\PostTypes\CoinPostTypeRegistrar())->boot();
         (new Admin\PostTypes\DesignerPostTypeRegistrar())->boot();
-        (new Admin\PostTypes\CoinPricePostTypeRegistrar())->boot();
         (new Admin\PostTypes\CoinCollectionPostTypeRegistrar())->boot();
 
         (new Admin\ACFFieldsManager\CoinACFFieldsManager())->boot();
         (new Admin\ACFFieldsManager\DesignerACFFieldsManager())->boot();
-        (new Admin\ACFFieldsManager\CoinPriceACFFieldsManager())->boot();
         (new Admin\ACFFieldsManager\CoinCollectionACFFieldsManager())->boot();
     }
 
@@ -47,6 +45,7 @@ class App
         }
 
         (new GraphQL\GraphQLRegistrar())->boot();
+        (new GraphQL\ConnectionLimits())->boot();
     }
 
     private function bootCron(): void

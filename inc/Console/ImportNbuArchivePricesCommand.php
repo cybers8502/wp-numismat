@@ -2,15 +2,17 @@
 
 namespace Coins\Console;
 
+use Coins\Prices\PriceRepository;
+use Coins\Prices\PriceSchema;
 use WP_CLI;
 use WP_Query;
 
 /**
- * Imports prices from coins.bank.gov.ua (the NBU's own shop archive) into
- * coin_price. Unlike FetchUaCoinsPricesCommand, this does NOT fetch over
- * HTTP — the archive is behind Bunny Shield (a JS proof-of-work anti-bot
- * challenge), so the data has to be collected via a real browser and handed
- * to this command as a JSON dump. See inc/Console/README.md.
+ * Imports prices from coins.bank.gov.ua (the NBU's own shop archive) into the
+ * custom coin_prices table. This does NOT fetch over HTTP — the archive is
+ * behind Bunny Shield (a JS proof-of-work anti-bot challenge), so the data has
+ * to be collected via a real browser and handed to this command as a JSON
+ * dump. See inc/Console/README.md.
  */
 class ImportNbuArchivePricesCommand
 {
@@ -20,7 +22,7 @@ class ImportNbuArchivePricesCommand
             'nbuarchive import-prices',
             self::class,
             [
-                'shortdesc' => 'Import a coins.bank.gov.ua archive JSON dump into coin_price',
+                'shortdesc' => 'Import a coins.bank.gov.ua archive JSON dump into the coin_prices table',
                 'synopsis'  => [
                     [
                         'type'        => 'assoc',
@@ -53,8 +55,7 @@ class ImportNbuArchivePricesCommand
 
     const SOURCE = 'coins.bank.gov.ua';
 
-    protected $post_type       = 'coins';
-    protected $price_post_type = 'coin_price';
+    protected $post_type = 'coins';
 
     /**
      * @when after_wp_load
@@ -79,6 +80,10 @@ class ImportNbuArchivePricesCommand
             WP_CLI::error('--price-date має бути у форматі Y-m-d');
         }
 
+        if (!$dry_run) {
+            PriceSchema::install();
+        }
+
         WP_CLI::log(sprintf(
             'Позицій у дампі: %d, дата ціни: %s%s',
             count($items),
@@ -90,12 +95,13 @@ class ImportNbuArchivePricesCommand
         $coins = $this->load_coins();
 
         $stats = [
-            'matched'          => 0,
-            'skipped_no_match' => 0,
-            'skipped_bad_item' => 0,
-            'prices_created'   => 0,
-            'prices_updated'   => 0,
+            'matched'           => 0,
+            'skipped_no_match'  => 0,
+            'skipped_bad_item'  => 0,
+            'prices_table_rows' => 0,
         ];
+
+        $table_rows = [];
 
         foreach ($items as $item) {
             $title = trim((string) ($item['title'] ?? ''));
@@ -123,24 +129,29 @@ class ImportNbuArchivePricesCommand
             ));
 
             if (!$dry_run) {
-                $result = $this->upsert_price($match['id'], $price_date, (float) $price, $item['sku'] ?? null);
-                if ($result === 'created') {
-                    $stats['prices_created']++;
-                } else {
-                    $stats['prices_updated']++;
-                }
+                $table_rows[] = [
+                    'coin_id'    => $match['id'],
+                    'source'     => self::SOURCE,
+                    'price_date' => $price_date,
+                    'price'      => (float) $price,
+                    'sku'        => $item['sku'] ?? null,
+                ];
             }
 
             $stats['matched']++;
         }
 
+        if (!$dry_run && $table_rows) {
+            (new PriceRepository())->upsertBatch($table_rows);
+            $stats['prices_table_rows'] = count($table_rows);
+        }
+
         WP_CLI::success(sprintf(
-            'Готово. Заматчено: %d, без відповідності: %d, некоректних записів: %d, цін створено: %d, оновлено: %d%s',
+            'Готово. Заматчено: %d, без відповідності: %d, некоректних записів: %d, рядків у таблиці цін: %d%s',
             $stats['matched'],
             $stats['skipped_no_match'],
             $stats['skipped_bad_item'],
-            $stats['prices_created'],
-            $stats['prices_updated'],
+            $stats['prices_table_rows'],
             $dry_run ? ' [DRY RUN]' : ''
         ));
     }
@@ -212,63 +223,5 @@ class ImportNbuArchivePricesCommand
         $title = preg_replace('~[^\p{L}\p{N}\s]~u', ' ', $title);
         $title = preg_replace('~\s+~u', ' ', $title);
         return trim((string) $title);
-    }
-
-    /** ----------------------- WP CRUD ----------------------- */
-
-    protected function upsert_price(int $coin_post_id, string $date, float $price, ?string $sku): string
-    {
-        $ymd = str_replace('-', '', $date); // ACF date_picker зберігає у форматі Ymd
-
-        $q = new WP_Query([
-            'post_type'      => $this->price_post_type,
-            'post_status'    => 'any',
-            'posts_per_page' => 1,
-            'fields'         => 'ids',
-            'meta_query'     => [
-                [
-                    'key'   => 'coin_id',
-                    'value' => $coin_post_id,
-                ],
-                [
-                    'key'   => 'price_date',
-                    'value' => $ymd,
-                ],
-                [
-                    'key'   => 'source',
-                    'value' => self::SOURCE,
-                ],
-            ],
-        ]);
-
-        $existing = !empty($q->posts) ? (int) $q->posts[0] : null;
-
-        if ($existing) {
-            $price_post_id = $existing;
-        } else {
-            $created = wp_insert_post([
-                'post_type'   => $this->price_post_type,
-                'post_status' => 'publish',
-                'post_title'  => sprintf('%s — %s (%s)', get_the_title($coin_post_id), $date, self::SOURCE),
-            ]);
-
-            if (is_wp_error($created)) {
-                WP_CLI::warning('Не вдалось створити coin_price: ' . $created->get_error_message());
-                return 'updated';
-            }
-
-            $price_post_id = (int) $created;
-        }
-
-        update_field('field_cp_coin', $coin_post_id, $price_post_id);
-        update_field('field_cp_date', $ymd, $price_post_id);
-        update_field('field_cp_price', $price, $price_post_id);
-        update_field('field_cp_source', self::SOURCE, $price_post_id);
-
-        if ($sku) {
-            update_post_meta($price_post_id, '_nbu_archive_sku', $sku);
-        }
-
-        return $existing ? 'updated' : 'created';
     }
 }

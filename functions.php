@@ -37,4 +37,6 @@ if (defined('WP_CLI') && WP_CLI) {
     \Coins\Console\FetchNbuDataCommand::register();
     \Coins\Console\FetchUaCoinsPricesCommand::register();
     \Coins\Console\ImportNbuArchivePricesCommand::register();
+    \Coins\Console\InstallSchemaCommand::register();
+    \Coins\Console\MigratePricesCommand::register();
 }
