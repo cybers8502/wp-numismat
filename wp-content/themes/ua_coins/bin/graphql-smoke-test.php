@@ -44,7 +44,7 @@ echo "(checked by calling something the plugin defines, not by asking WP whether
 $runtimeChecks = [
     'WPGraphQL'                    => fn() => class_exists('WPGraphQL'),
     'ACF (get_field)'              => fn() => function_exists('get_field'),
-    'wp-graphql-jwt-authentication' => fn() => function_exists('graphql_jwt_auth'),
+    'wp-graphql-jwt-authentication' => fn() => function_exists('WPGraphQL\JWT_Authentication\init'),
 ];
 
 foreach ($runtimeChecks as $label => $check) {
