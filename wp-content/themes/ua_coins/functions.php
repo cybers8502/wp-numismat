@@ -9,9 +9,11 @@ add_filter('determine_current_user', function ($user_id) {
         return $user_id;
     }
 
-    $auth_header = $_SERVER['HTTP_AUTHORIZATION']
-        ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
-        ?? null;
+    $auth_header = isset($_SERVER['HTTP_AUTHORIZATION'])
+        ? sanitize_text_field(wp_unslash($_SERVER['HTTP_AUTHORIZATION']))
+        : (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])
+            ? sanitize_text_field(wp_unslash($_SERVER['REDIRECT_HTTP_AUTHORIZATION']))
+            : null);
 
     if (!$auth_header || !str_starts_with($auth_header, 'Basic ')) {
         return $user_id;

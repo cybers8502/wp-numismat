@@ -48,9 +48,9 @@ class FetchNbuDataCommand
         );
     }
 
-    const BASE = 'https://bank.gov.ua';
-    const LIST_URL  = '/ua/uah/numismatic-products/souvenier-coins';
-    const AJAX_URL  = '/ua/component/source/searchSouvenierCoinResult';
+    public const BASE = 'https://bank.gov.ua';
+    public const LIST_URL  = '/ua/uah/numismatic-products/souvenier-coins';
+    public const AJAX_URL  = '/ua/component/source/searchSouvenierCoinResult';
 
     // Налаштування (під себе)
     protected $post_type = 'coins'; // CPT
@@ -83,9 +83,12 @@ class FetchNbuDataCommand
      *
      * @when after_wp_load
      */
-    public function __invoke( $args, $assoc_args ) {
+    public function __invoke($args, $assoc_args)
+    {
         $perPage = isset($assoc_args['per-page']) ? (int)$assoc_args['per-page'] : 100;
-        if (!in_array($perPage, [5,10,25,100], true)) $perPage = 100;
+        if (!in_array($perPage, [5,10,25,100], true)) {
+            $perPage = 100;
+        }
 
         $dry_run = isset($assoc_args['dry-run']);
 
@@ -96,8 +99,8 @@ class FetchNbuDataCommand
 
         // 1) Дізнаємося total, щоб визначити кількість сторінок (якщо --pages=all)
         $first_html = $this->fetch_ajax_html(1, $perPage);
-        if ( is_wp_error($first_html) ) {
-            WP_CLI::error( 'Помилка запиту першої сторінки: ' . $first_html->get_error_message() );
+        if (is_wp_error($first_html)) {
+            WP_CLI::error('Помилка запиту першої сторінки: ' . $first_html->get_error_message());
         }
         $total = $this->extract_total_count($first_html);
         $total_pages = max(1, (int)ceil($total / $perPage));
@@ -106,8 +109,13 @@ class FetchNbuDataCommand
         $pages_arg = isset($assoc_args['pages']) ? $assoc_args['pages'] : '1';
         $pages = $this->resolve_pages_arg($pages_arg, $total_pages);
 
-        WP_CLI::log( sprintf('Знайдено ~%d результатів, сторінок: %d, качаємо: %s (perPage=%d)%s',
-            $total, $total_pages, implode(',', $pages), $perPage, $dry_run ? ' [DRY RUN]' : ''
+        WP_CLI::log(sprintf(
+            'Знайдено ~%d результатів, сторінок: %d, качаємо: %s (perPage=%d)%s',
+            $total,
+            $total_pages,
+            implode(',', $pages),
+            $perPage,
+            $dry_run ? ' [DRY RUN]' : ''
         ));
 
         require_once ABSPATH . 'wp-admin/includes/file.php';
@@ -116,11 +124,10 @@ class FetchNbuDataCommand
 
         $processed = 0;
 
-        foreach ( $pages as $page ) {
-
+        foreach ($pages as $page) {
             WP_CLI::log("Сторінка $page ...");
             $html = $page === 1 ? $first_html : $this->fetch_ajax_html($page, $perPage);
-            if ( is_wp_error($html) ) {
+            if (is_wp_error($html)) {
                 WP_CLI::warning("Пропускаю сторінку $page: " . $html->get_error_message());
                 continue;
             }
@@ -128,7 +135,7 @@ class FetchNbuDataCommand
             $items = $this->parse_items($html);
             WP_CLI::log("Знайдено елементів: " . count($items));
 
-            foreach ( $items as $item ) {
+            foreach ($items as $item) {
                 if ($limit !== null && $processed >= $limit) {
                     WP_CLI::log("Ліміт досягнуто ({$limit}). Зупиняюсь.");
                     break 2; // вихід з foreach items + foreach pages
@@ -178,7 +185,8 @@ class FetchNbuDataCommand
 
     /** ----------------------- HTTP ----------------------- */
 
-    protected function fetch_ajax_html(int $page, int $perPage) {
+    protected function fetch_ajax_html(int $page, int $perPage)
+    {
         // НБУ використовує AJAX POST на окремий endpoint для пагінації.
         // GET-запит до LIST_URL завжди повертає першу сторінку незалежно від ?page=N.
         $resp = wp_remote_post(self::BASE . self::AJAX_URL, [
@@ -199,10 +207,12 @@ class FetchNbuDataCommand
             ],
         ]);
 
-        if ( is_wp_error($resp) ) return $resp;
+        if (is_wp_error($resp)) {
+            return $resp;
+        }
 
         $code = wp_remote_retrieve_response_code($resp);
-        if ( $code !== 200 ) {
+        if ($code !== 200) {
             return new \WP_Error('http', 'HTTP ' . $code);
         }
 
@@ -215,7 +225,8 @@ class FetchNbuDataCommand
 
     /** ----------------------- PARSE ----------------------- */
 
-    protected function extract_total_count(string $html): int {
+    protected function extract_total_count(string $html): int
+    {
         // UА: "знайдено <b>1094 результати</b>"
         if (preg_match('~знайдено\s*<b>\s*([\d\s]+)~u', $html, $m)) {
             return (int)preg_replace('~\D+~', '', $m[1]);
@@ -223,7 +234,8 @@ class FetchNbuDataCommand
         return 0;
     }
 
-    protected function parse_items(string $html): array {
+    protected function parse_items(string $html): array
+    {
         $dom = new \DOMDocument();
         libxml_use_internal_errors(true);
         @$dom->loadHTML('<?xml encoding="utf-8" ?>' . $html);
@@ -241,9 +253,9 @@ class FetchNbuDataCommand
                 'title'         => $raw_title,
                 'short_title'   => $this->strip_metal_mark($raw_title),
                 'denomination'  => $this->extract_mark($xp, $node, 'Номінал:'),
-                'issue_date'    => $this->normalize_date_ua( $this->extract_mark_any($xp, $node, ['Дата введення в обіг:', 'Дата випуску:']) ),
+                'issue_date'    => $this->normalize_date_ua($this->extract_mark_any($xp, $node, ['Дата введення в обіг:', 'Дата випуску:'])),
                 'material'      => $this->extract_mark($xp, $node, 'Матеріал:'),
-                'booklet_url'   => $this->abs_url( $this->xp_attr($xp, ".//div[contains(@class,'souvenir-coin__booklet')]//a", "href", $node) ),
+                'booklet_url'   => $this->abs_url($this->xp_attr($xp, ".//div[contains(@class,'souvenir-coin__booklet')]//a", "href", $node)),
                 'description_html' => $this->collect_description_html($xp, $node),
                 'designers_artist'     => $this->extract_mark($xp, $node, 'Художник:'),
                 'designers_designer'   => $this->extract_mark($xp, $node, 'Дизайнер:'),
@@ -264,8 +276,8 @@ class FetchNbuDataCommand
             // Розбивка тиражу
             if (!empty($item['mintage_raw'])) {
                 if (preg_match('~(\d[\d\s]*)/(\d[\d\s]*)~u', $item['mintage_raw'], $mm)) {
-                    $item['mintage_declared'] = (int)preg_replace('~\D+~','',$mm[1]);
-                    $item['mintage_actual']   = (int)preg_replace('~\D+~','',$mm[2]);
+                    $item['mintage_declared'] = (int)preg_replace('~\D+~', '', $mm[1]);
+                    $item['mintage_actual']   = (int)preg_replace('~\D+~', '', $mm[2]);
                 } else {
                     $item['mintage_declared'] = null;
                     $item['mintage_actual']   = null;
@@ -282,7 +294,8 @@ class FetchNbuDataCommand
         return $items;
     }
 
-    protected function collect_description_html(DOMXPath $xp, DOMNode $ctx): string {
+    protected function collect_description_html(DOMXPath $xp, DOMNode $ctx): string
+    {
         $paras = $xp->query(".//div[contains(@class,'details')]//div[contains(@class,'description')]//div[contains(@class,'description__text')]", $ctx);
         $html = '';
         foreach ($paras as $p) {
@@ -291,7 +304,8 @@ class FetchNbuDataCommand
         return trim($html);
     }
 
-    protected function collect_images(DOMXPath $xp, DOMNode $ctx): array {
+    protected function collect_images(DOMXPath $xp, DOMNode $ctx): array
+    {
         $urls = [];
         // Основні великі картинки у href + видимі прев’юшки у img[src]
         foreach (['.//div[contains(@class,"img-container")]//a[contains(@class,"big-image")]', './/div[contains(@class,"img-container")]//img'] as $q) {
@@ -300,7 +314,9 @@ class FetchNbuDataCommand
                 $href = $n->attributes->getNamedItem('href');
                 $src  = $n->attributes->getNamedItem('src');
                 $u = $href ? $href->nodeValue : ($src ? $src->nodeValue : null);
-                if ($u) $urls[] = $this->abs_url($u);
+                if ($u) {
+                    $urls[] = $this->abs_url($u);
+                }
             }
         }
         // Унікалізуємо і трішки фільтруємо
@@ -308,25 +324,31 @@ class FetchNbuDataCommand
         return $urls;
     }
 
-    protected function extract_mark(DOMXPath $xp, DOMNode $ctx, string $label): ?string {
+    protected function extract_mark(DOMXPath $xp, DOMNode $ctx, string $label): ?string
+    {
         // Знаходимо span.mark з точним текстом і читаємо сусідній span.mark-text
         $node = $xp->query(".//span[contains(@class,'mark') and normalize-space(text())='{$label}']/following-sibling::span[contains(@class,'mark-text')][1]", $ctx)->item(0);
         return $node ? trim($node->textContent) : null;
     }
 
-    protected function xp_text(DOMXPath $xp, string $q, ?DOMNode $ctx = null): ?string {
+    protected function xp_text(DOMXPath $xp, string $q, ?DOMNode $ctx = null): ?string
+    {
         $n = $xp->query($q, $ctx)->item(0);
         return $n ? trim($n->textContent) : null;
     }
 
-    protected function xp_attr(DOMXPath $xp, string $q, string $attr, ?DOMNode $ctx = null): ?string {
+    protected function xp_attr(DOMXPath $xp, string $q, string $attr, ?DOMNode $ctx = null): ?string
+    {
         $n = $xp->query($q, $ctx)->item(0);
-        if (!$n || !$n->attributes) return null;
+        if (!$n || !$n->attributes) {
+            return null;
+        }
         $a = $n->attributes->getNamedItem($attr);
         return $a ? trim($a->nodeValue) : null;
     }
 
-    protected function node_inner_html(DOMNode $node): string {
+    protected function node_inner_html(DOMNode $node): string
+    {
         $html = '';
         foreach ($node->childNodes as $child) {
             $html .= $node->ownerDocument->saveHTML($child);
@@ -334,16 +356,24 @@ class FetchNbuDataCommand
         return $html;
     }
 
-    protected function abs_url(?string $u): ?string {
-        if (!$u) return null;
-        if (preg_match('~^https?://~i', $u)) return $u;
+    protected function abs_url(?string $u): ?string
+    {
+        if (!$u) {
+            return null;
+        }
+        if (preg_match('~^https?://~i', $u)) {
+            return $u;
+        }
         // прибрати подвійні слеші
         return rtrim(self::BASE, '/') . '/' . ltrim($u, '/');
     }
 
-    protected function normalize_date_ua(?string $d): ?string {
+    protected function normalize_date_ua(?string $d): ?string
+    {
         // '22.08.2025' -> '2025-08-22'
-        if (!$d) return null;
+        if (!$d) {
+            return null;
+        }
         if (preg_match('~(\d{2})\.(\d{2})\.(\d{4})~', $d, $m)) {
             return sprintf('%04d-%02d-%02d', $m[3], $m[2], $m[1]);
         }
@@ -353,12 +383,13 @@ class FetchNbuDataCommand
 
     /** ----------------------- WP CRUD ----------------------- */
 
-    protected function create_post(string $title, array $item): int {
+    protected function create_post(string $title, array $item): int
+    {
         $postarr = [
             'post_type'   => $this->post_type,
             'post_status' => 'publish',
             'post_title'  => $title,
-            'post_content'=> $item['description_html'] ?? '',
+            'post_content' => $item['description_html'] ?? '',
         ];
         if (!empty($item['issue_date'])) {
             $postarr['post_date']     = $item['issue_date'] . ' 00:00:00';
@@ -373,7 +404,8 @@ class FetchNbuDataCommand
         return (int)$post_id;
     }
 
-    protected function update_post_and_meta(int $post_id, array $item): void {
+    protected function update_post_and_meta(int $post_id, array $item): void
+    {
         $postarr = [
             'ID'           => $post_id,
             'post_title'   => $item['title'] ?? get_the_title($post_id),
@@ -387,16 +419,17 @@ class FetchNbuDataCommand
         $this->fill_meta_acf($post_id, $item);
     }
 
-    protected function fill_meta_acf(int $post_id, array $item): void {
+    protected function fill_meta_acf(int $post_id, array $item): void
+    {
         // ✅ 1) Facets → taxonomies
-        $this->assign_taxonomy_single($post_id, 'coin_series',       $item['series'] ?? null);
+        $this->assign_taxonomy_single($post_id, 'coin_series', $item['series'] ?? null);
         $this->assign_taxonomy_single($post_id, 'coin_denomination', $item['denomination'] ?? null);
-        $this->assign_taxonomy_single($post_id, 'coin_material',     $item['material'] ?? null);
-        $this->assign_taxonomy_single($post_id, 'coin_quality',      $item['quality'] ?? null);
-        $this->assign_taxonomy_single($post_id, 'coin_edge',         $item['edge'] ?? null);
-        $this->assign_taxonomy_single($post_id, 'coin_diameter',         $item['diameter_mm'] ?? null);
+        $this->assign_taxonomy_single($post_id, 'coin_material', $item['material'] ?? null);
+        $this->assign_taxonomy_single($post_id, 'coin_quality', $item['quality'] ?? null);
+        $this->assign_taxonomy_single($post_id, 'coin_edge', $item['edge'] ?? null);
+        $this->assign_taxonomy_single($post_id, 'coin_diameter', $item['diameter_mm'] ?? null);
         $this->assign_taxonomy_single($post_id, 'coin_mintage_declared', $item['mintage_declared'] ?? null);
-        $this->assign_taxonomy_single($post_id, 'coin_mintage_actual',   $item['mintage_actual'] ?? null);
+        $this->assign_taxonomy_single($post_id, 'coin_mintage_actual', $item['mintage_actual'] ?? null);
 
         // Тип — монета чи банкнота
         $type = $this->detect_type($item['title'] ?? '');
@@ -428,13 +461,19 @@ class FetchNbuDataCommand
         update_post_meta($post_id, 'booklet_url', $item['booklet_url'] ?? '');
         update_post_meta($post_id, 'short_title', $item['short_title'] ?? '');
 
-        if (isset($item['mintage_declared'])) update_post_meta($post_id, 'mintage_declared', $item['mintage_declared']);
-        if (isset($item['mintage_actual']))   update_post_meta($post_id, 'mintage_actual', $item['mintage_actual']);
-        if (isset($item['diameter_mm']))      update_post_meta($post_id, 'diameter_mm', $item['diameter_mm']);
+        if (isset($item['mintage_declared'])) {
+            update_post_meta($post_id, 'mintage_declared', $item['mintage_declared']);
+        }
+        if (isset($item['mintage_actual'])) {
+            update_post_meta($post_id, 'mintage_actual', $item['mintage_actual']);
+        }
+        if (isset($item['diameter_mm'])) {
+            update_post_meta($post_id, 'diameter_mm', $item['diameter_mm']);
+        }
 
         // (необов’язково) якщо хочеш лишити дубль для дебагу — можеш лишити, але для фільтрів вже не треба:
          update_post_meta($post_id, 'quality', $item['quality'] ?? '');
-         update_post_meta($post_id, 'edge',    $item['edge'] ?? '');
+         update_post_meta($post_id, 'edge', $item['edge'] ?? '');
 
         // ✅ 4) ACF (якщо є)
         if (function_exists('update_field')) {
@@ -445,14 +484,23 @@ class FetchNbuDataCommand
                 $this->update_acf($post_id, $this->acf_map[$role], $designer_ids_by_role[$role]);
             }
 
-            if (isset($item['mintage_declared'])) $this->update_acf($post_id, $this->acf_map['mintage_declared'], $item['mintage_declared']);
-            if (isset($item['mintage_actual']))   $this->update_acf($post_id, $this->acf_map['mintage_actual'],   $item['mintage_actual']);
-            if (isset($item['diameter_mm']))      $this->update_acf($post_id, $this->acf_map['diameter_mm'],      $item['diameter_mm']);
+            if (isset($item['mintage_declared'])) {
+                $this->update_acf($post_id, $this->acf_map['mintage_declared'], $item['mintage_declared']);
+            }
+            if (isset($item['mintage_actual'])) {
+                $this->update_acf($post_id, $this->acf_map['mintage_actual'], $item['mintage_actual']);
+            }
+            if (isset($item['diameter_mm'])) {
+                $this->update_acf($post_id, $this->acf_map['diameter_mm'], $item['diameter_mm']);
+            }
         }
     }
 
-    protected function update_acf(int $post_id, string $field_key_or_name, $value): void {
-        if (!$field_key_or_name) return;
+    protected function update_acf(int $post_id, string $field_key_or_name, $value): void
+    {
+        if (!$field_key_or_name) {
+            return;
+        }
         try {
             update_field($field_key_or_name, $value, $post_id);
         } catch (\Throwable $e) {
@@ -466,7 +514,8 @@ class FetchNbuDataCommand
         return md5($title . '|' . (string) $issue_date);
     }
 
-    protected function find_existing_post(string $title, ?string $issue_date): ?int {
+    protected function find_existing_post(string $title, ?string $issue_date): ?int
+    {
         $key = $this->nbu_key($title, $issue_date);
 
         // Primary: стабільний ключ, не залежить від подальших змін у пості
@@ -480,7 +529,9 @@ class FetchNbuDataCommand
                 'value' => $key,
             ]],
         ]);
-        if (!empty($q->posts)) return (int) $q->posts[0];
+        if (!empty($q->posts)) {
+            return (int) $q->posts[0];
+        }
 
         // Fallback для постів, імпортованих до появи _nbu_key
         if ($issue_date) {
@@ -535,7 +586,8 @@ class FetchNbuDataCommand
         return !empty($q->posts) ? (int) $q->posts[0] : null;
     }
 
-    protected function download_and_attach_images(array $urls, int $post_id): array {
+    protected function download_and_attach_images(array $urls, int $post_id): array
+    {
         $ids = [];
         foreach ($urls as $u) {
             // Перевірка дублікату — якщо вже завантажено раніше, повторно не качаємо
@@ -547,7 +599,10 @@ class FetchNbuDataCommand
             }
 
             $tmp = download_url($u, 20);
-            if (is_wp_error($tmp)) { WP_CLI::warning("  IMG skip: $u (" . $tmp->get_error_message() . ")"); continue; }
+            if (is_wp_error($tmp)) {
+                WP_CLI::warning("  IMG skip: $u (" . $tmp->get_error_message() . ")");
+                continue;
+            }
 
             $file_array = [
                 'name'     => basename(parse_url($u, PHP_URL_PATH)),
@@ -571,14 +626,17 @@ class FetchNbuDataCommand
 
     /** ----------------------- UTILS ----------------------- */
 
-    protected function resolve_pages_arg(string $pages_arg, int $total_pages): array {
+    protected function resolve_pages_arg(string $pages_arg, int $total_pages): array
+    {
         $pages = [];
         if ($pages_arg === 'all') {
             $pages = range(1, $total_pages);
         } elseif (preg_match('~^(\d+)-(\d+)$~', $pages_arg, $m)) {
             $start = max(1, (int)$m[1]);
             $end   = min($total_pages, (int)$m[2]);
-            if ($start > $end) [$start, $end] = [$end, $start];
+            if ($start > $end) {
+                [$start, $end] = [$end, $start];
+            }
             $pages = range($start, $end);
         } else {
             $p = max(1, (int)$pages_arg);
@@ -591,7 +649,9 @@ class FetchNbuDataCommand
     {
         foreach ($labels as $label) {
             $val = $this->extract_mark($xp, $ctx, $label);
-            if ($val) return $val;
+            if ($val) {
+                return $val;
+            }
         }
         return null;
     }
@@ -599,7 +659,9 @@ class FetchNbuDataCommand
     protected function parse_designers(?string $raw): array
     {
         $raw = trim((string) $raw);
-        if ($raw === '') return [];
+        if ($raw === '') {
+            return [];
+        }
 
         // Найчастіше там один або кілька через кому/крапку з комою
         $parts = preg_split('~\s*[,;]\s*~u', $raw);
@@ -645,14 +707,18 @@ class FetchNbuDataCommand
 
         foreach ($raw as $label_role => $value) {
             $value = trim((string) $value);
-            if ($value === '') continue;
+            if ($value === '') {
+                continue;
+            }
 
             // Розбиваємо по комі — розділювач між записами в одному полі
             $segments = preg_split('~\s*,\s*~u', $value);
 
             foreach ($segments as $segment) {
                 $segment = trim($segment);
-                if ($segment === '') continue;
+                if ($segment === '') {
+                    continue;
+                }
 
                 $assigned_role = $label_role; // роль, визначена HTML-міткою
                 $name_part     = $segment;
@@ -693,7 +759,9 @@ class FetchNbuDataCommand
         $ids = [];
 
         foreach ($names as $name) {
-            if ($name === '') continue;
+            if ($name === '') {
+                continue;
+            }
 
             $q = new \WP_Query([
                 'post_type'      => 'designer',
@@ -728,12 +796,15 @@ class FetchNbuDataCommand
     protected function ensure_term(string $taxonomy, string $name, int $parent = 0): int
     {
         $name = trim($name);
-        if ($name === '') return 0;
+        if ($name === '') {
+            return 0;
+        }
 
         $exists = term_exists($name, $taxonomy, $parent);
 
-        if (is_array($exists) && isset($exists['term_id'])) return (int) $exists['term_id'];
-        if (is_int($exists)) return (int) $exists;
+        if (is_array($exists) && isset($exists['term_id'])) {
+            return (int) $exists['term_id'];
+        }
 
         $created = wp_insert_term($name, $taxonomy, ['parent' => $parent]);
         if (is_wp_error($created)) {
@@ -746,15 +817,21 @@ class FetchNbuDataCommand
     protected function assign_taxonomy_single(int $post_id, string $taxonomy, ?string $value): void
     {
         $value = trim((string)$value);
-        if ($value === '') return;
+        if ($value === '') {
+            return;
+        }
 
         $term_id = $this->ensure_term($taxonomy, $value);
-        if ($term_id) wp_set_post_terms($post_id, [$term_id], $taxonomy, false);
+        if ($term_id) {
+            wp_set_post_terms($post_id, [$term_id], $taxonomy, false);
+        }
     }
 
     protected function strip_metal_mark(?string $title): ?string
     {
-        if ($title === null) return null;
+        if ($title === null) {
+            return null;
+        }
         // Прибираємо позначки типу металу в кінці назви: (с), (н), (бм), (з) тощо
         return trim(preg_replace('~\s*\([а-яіїєґa-z]{1,4}\)\s*$~iu', '', $title));
     }
@@ -788,7 +865,8 @@ class FetchNbuDataCommand
             return 'Ролик';
         }
 
-        if (mb_strpos($title_lower, 'сувенірному пакованн') !== false
+        if (
+            mb_strpos($title_lower, 'сувенірному пакованн') !== false
             || mb_strpos($title_lower, 'сувенірному пакуванн') !== false
         ) {
             return 'В сувенірному пакуванні';
@@ -800,22 +878,30 @@ class FetchNbuDataCommand
     protected function assign_taxonomy_hierarchical(int $post_id, string $taxonomy, ?string $path): void
     {
         $path = trim((string)$path);
-        if ($path === '') return;
+        if ($path === '') {
+            return;
+        }
 
         $path = str_replace(['→','>','|','\\'], '/', $path);
         $parts = preg_split('~\s*/\s*~u', $path);
         $parts = array_values(array_filter(array_map('trim', (array)$parts)));
-        if (!$parts) return;
+        if (!$parts) {
+            return;
+        }
 
         $parent = 0;
         $last = 0;
         foreach ($parts as $p) {
             $id = $this->ensure_term($taxonomy, $p, $parent);
-            if (!$id) break;
+            if (!$id) {
+                break;
+            }
             $parent = $id;
             $last = $id;
         }
 
-        if ($last) wp_set_post_terms($post_id, [$last], $taxonomy, false);
+        if ($last) {
+            wp_set_post_terms($post_id, [$last], $taxonomy, false);
+        }
     }
 }

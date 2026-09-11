@@ -53,7 +53,7 @@ class ImportNbuArchivePricesCommand
         );
     }
 
-    const SOURCE = 'coins.bank.gov.ua';
+    public const SOURCE = 'coins.bank.gov.ua';
 
     protected $post_type = 'coins';
 

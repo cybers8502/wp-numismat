@@ -4,7 +4,6 @@ namespace Coins\Rest;
 
 class ApiRouter
 {
-
     public function __construct()
     {
         add_action('rest_api_init', [$this, 'registerRoutes']);

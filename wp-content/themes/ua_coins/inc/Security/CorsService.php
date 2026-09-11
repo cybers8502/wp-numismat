@@ -6,7 +6,8 @@ class CorsService
 {
     private const ALLOWED_HEADERS = ['Authorization', 'Content-Type', 'X-WP-Nonce', 'X-App-Token'];
 
-    public function __construct() {
+    public function __construct()
+    {
         add_action('rest_pre_serve_request', [$this, 'handleCors']);
 
         // WPGraphQL builds its own CORS headers in its Router and ignores the

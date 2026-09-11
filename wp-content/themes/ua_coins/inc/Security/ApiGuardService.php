@@ -52,7 +52,9 @@ class ApiGuardService
 
     private function clientIp(): string
     {
-        $ip = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+        $ip = isset($_SERVER['HTTP_X_FORWARDED_FOR'])
+            ? sanitize_text_field(wp_unslash($_SERVER['HTTP_X_FORWARDED_FOR']))
+            : (isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'])) : '0.0.0.0');
         $ip = explode(',', $ip)[0];
 
         return sanitize_text_field(trim($ip));

@@ -41,6 +41,7 @@ class InstallSchemaCommand
             WP_CLI::error("Таблицю {$table} не створено — перевір DDL або права БД.");
         }
 
+        // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $table is a fixed internal identifier (PriceSchema::table()), not user input; %s/%i placeholders don't support table names anyway.
         $count = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table}");
 
         WP_CLI::success(sprintf(

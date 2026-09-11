@@ -13,7 +13,9 @@ class AppTokenController
     // GET /app-token
     public function issue(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
-        $ip = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+        $ip = isset($_SERVER['HTTP_X_FORWARDED_FOR'])
+            ? sanitize_text_field(wp_unslash($_SERVER['HTTP_X_FORWARDED_FOR']))
+            : (isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'])) : '0.0.0.0');
         $ip = sanitize_text_field(trim(explode(',', $ip)[0]));
 
         if (RateLimiter::isLimited("app_token_issue_{$ip}", 10, MINUTE_IN_SECONDS)) {

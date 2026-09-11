@@ -4,7 +4,7 @@ namespace Coins\Cron;
 
 class DailyImportScheduler
 {
-    const HOOK = 'coins_daily_import_and_webp';
+    public const HOOK = 'coins_daily_import_and_webp';
 
     public function boot(): void
     {

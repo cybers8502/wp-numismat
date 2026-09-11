@@ -22,7 +22,9 @@ class PriceRepository
         global $wpdb;
 
         $table = PriceSchema::table();
-        $rows  = $wpdb->get_results(
+
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $table is a fixed internal identifier (PriceSchema::table()), not user input; %s/%i placeholders don't support table names anyway.
+        $rows = $wpdb->get_results(
             $wpdb->prepare(
                 "SELECT id, price_date, price, source
                    FROM {$table}
@@ -32,6 +34,7 @@ class PriceRepository
             ),
             ARRAY_A
         );
+        // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
         return array_map([self::class, 'hydrate'], $rows ?: []);
     }
@@ -56,7 +59,9 @@ class PriceRepository
 
         $table        = PriceSchema::table();
         $placeholders = implode(',', array_fill(0, count($coinIds), '%d'));
-        $rows         = $wpdb->get_results(
+
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- $table is a fixed internal identifier; $placeholders is a generated string of literal %d placeholders (one per element of $coinIds), not a value, and is itself passed through prepare() below.
+        $rows = $wpdb->get_results(
             $wpdb->prepare(
                 "SELECT id, coin_id, price_date, price, source
                    FROM {$table}
@@ -66,6 +71,7 @@ class PriceRepository
             ),
             ARRAY_A
         );
+        // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
 
         foreach ($rows ?: [] as $row) {
             $out[(int) $row['coin_id']][] = self::hydrate($row);
@@ -110,6 +116,7 @@ class PriceRepository
                         price = VALUES(price),
                         sku   = VALUES(sku)";
 
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $sql is a fixed-shape INSERT built from a constant table name and a repeated %d,%s,%s,%f,%s tuple string; the actual values are all passed through prepare() below.
             if ($wpdb->query($wpdb->prepare($sql, $values)) !== false) {
                 $sent += count($chunk);
             }

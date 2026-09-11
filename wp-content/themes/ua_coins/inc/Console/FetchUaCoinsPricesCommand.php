@@ -55,13 +55,13 @@ class FetchUaCoinsPricesCommand
         );
     }
 
-    const BASE        = 'https://www.ua-coins.info';
-    const SEARCH_PATH  = '/ua/search';
-    const SOURCE       = 'ua-coins.info';
+    public const BASE        = 'https://www.ua-coins.info';
+    public const SEARCH_PATH  = '/ua/search';
+    public const SOURCE       = 'ua-coins.info';
 
     // /coin/prices/{id} 403-ить без Referer + браузерного User-Agent (Cloudflare/WAF
     // блокує запити з нетиповим UA навіть із дійсним підписаним посиланням).
-    const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+    public const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
     protected $post_type = 'coins';
 

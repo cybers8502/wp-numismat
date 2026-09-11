@@ -239,6 +239,7 @@ class MigratePricesCommand
             OBJECT_K
         );
 
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $table is a fixed internal identifier (PriceSchema::table()), not user input; %s/%i placeholders don't support table names anyway.
         $tbl = $wpdb->get_results(
             "SELECT source,
                     COUNT(*) AS rows_n,
@@ -247,6 +248,7 @@ class MigratePricesCommand
               GROUP BY source",
             OBJECT_K
         );
+        // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
         $sources = array_values(array_unique(array_merge(array_keys($cpt), array_keys($tbl))));
         sort($sources);
@@ -287,6 +289,7 @@ class MigratePricesCommand
         }
 
         if ($deep) {
+            // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $table is a fixed internal identifier (PriceSchema::table()), not user input; %s/%i placeholders don't support table names anyway.
             $orphans = (int) $wpdb->get_var(
                 "SELECT COUNT(*)
                    FROM {$table} tp
@@ -302,6 +305,7 @@ class MigratePricesCommand
                            AND ABS(pr.meta_value + 0 - tp.price) < 0.005
                   )"
             );
+            // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
             WP_CLI::log(sprintf('  deep: рядків таблиці без відповідного CPT-поста: %d', $orphans));
             $all_ok = $all_ok && $orphans === 0;
