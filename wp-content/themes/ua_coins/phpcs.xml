@@ -6,6 +6,12 @@
     <file>inc</file>
     <file>tests</file>
     <file>bin</file>
+    <file>404.php</file>
+    <file>footer.php</file>
+    <file>header.php</file>
+    <file>index.php</file>
+    <file>page.php</file>
+    <file>single.php</file>
 
     <exclude-pattern>*/vendor/*</exclude-pattern>
     <exclude-pattern>*/node_modules/*</exclude-pattern>
