@@ -54,11 +54,15 @@ wp-content/languages/
 wp-content/upgrade/
 publish/
 
-# Server access notes, wp-config.php backups, and local secrets
+# Server access notes, wp-config.php/.env backups, and local secrets
 SERVER.md
 _wp-config.php
 _S_wp-config.php
 .env
+.env.bak-*
+
+# Cron job output logs (cron-coins.sh) - runtime data, not source
+cron-*.log
 
 # PHP tooling caches
 .phpunit.cache/
