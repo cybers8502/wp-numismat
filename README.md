@@ -86,7 +86,7 @@ core files) or vendor/public plugin code — both are identical, downloadable
 artifacts that only produce churn when committed. Reproduce them instead of
 tracking them:
 
-- **WordPress core:** currently `6.9.1`. `wp core download --version=6.9.1`.
+- **WordPress core:** currently `7.1`. `wp core download --version=7.1`.
 - **Plugins:** managed via Composer + [WPackagist](https://wpackagist.org)
   (the wordpress.org plugin mirror as Composer packages) for `wp-graphql`,
   plus one GitHub-sourced plugin (`wp-graphql/wp-graphql-jwt-authentication`)
