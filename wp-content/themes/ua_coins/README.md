@@ -43,21 +43,19 @@ wp nbu parse-souvenir --pages=1 --dry-run
 
 ---
 
-## WP-CLI — імпорт цін
+## Імпорт цін
 
-```bash
-# ua-coins.info — щоденна історія цін, скрейпиться напряму
-wp uacoins import-prices --dry-run
-wp uacoins import-prices --post_id=169
-wp uacoins import-prices
-
-# coins.bank.gov.ua (архів магазину НБУ) — одна "остання відома" ціна,
-# дані готуються заздалегідь у JSON (сайт за Bunny Shield anti-bot захистом)
-wp nbuarchive import-prices --file=archive.json --dry-run
-wp nbuarchive import-prices --file=archive.json
-```
-
-Обидва пишуть в CPT `coin_price` (`source=ua-coins.info` / `source=coins.bank.gov.ua`), матчачи наявні `coins`-пости за схожістю назви. Повна документація джерел, матчингу, збереження і відомих обмежень — `inc/Console/README.md`.
+Ціни (`ua-coins.info` та `coins.bank.gov.ua`) більше не імпортуються звідси —
+цим займається окремий репозиторій
+[`node-coins-price-parser`](../../../../node-coins-price-parser), що пише
+напряму в MySQL-таблицю `{prefix}coin_prices` (`PriceRepository`/
+`PriceSchema`), оминаючи WordPress повністю. Колишні WP-CLI команди
+`wp uacoins import-prices` / `wp nbuarchive import-prices`
+(`FetchUaCoinsPricesCommand`/`ImportNbuArchivePricesCommand`) видалені —
+node-coins-price-parser є їх прямим портом (той самий матчинг за схожістю
+назви, ті самі `source`-теги). Історія джерел, матчингу й відомих обмежень
+лишається задокументованою в `inc/Console/README.md` як довідка про те, як
+ці дані структуровані.
 
 ---
 
@@ -239,9 +237,9 @@ inc/
 │   ├── CollectionGraphQL.php  ← типи, myCollection/myCollectionStats, addToCollection/updateCollectionItem/deleteCollectionItem
 │   └── AuthGraphQL.php        ← logout
 └── Console/                   ← див. inc/Console/README.md
-    ├── FetchNbuDataCommand.php          ← WP-CLI імпортер монет (bank.gov.ua)
-    ├── FetchUaCoinsPricesCommand.php    ← WP-CLI імпортер цін (ua-coins.info)
-    └── ImportNbuArchivePricesCommand.php ← WP-CLI імпортер цін з JSON-дампу (coins.bank.gov.ua)
+    ├── FetchNbuDataCommand.php     ← WP-CLI імпортер монет (bank.gov.ua)
+    ├── InstallSchemaCommand.php    ← WP-CLI: створити/оновити таблицю coin_prices
+    └── MigratePricesCommand.php    ← WP-CLI: одноразова міграція coin_price CPT → таблиця coin_prices
 ```
 
 **Namespace:** `Coins\` → `inc/` (PSR-4, composer autoload)

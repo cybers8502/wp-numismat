@@ -1,20 +1,26 @@
-# WP-CLI імпортери
+# WP-CLI імпортер монет + документація цінового імпорту
 
-Три незалежні імпортери, всі командного рядка (`@when after_wp_load`), без cron — запускаються вручну коли потрібно.
+Один WP-CLI імпортер лишився в цьому репо (командного рядка, `@when after_wp_load`, без cron — запускається вручну):
 
 | Команда | Джерело | Що пише |
 |---|---|---|
 | `wp nbu parse-souvenir` | bank.gov.ua | CPT `coins` (самі монети, картинки, дизайнери) |
-| `wp uacoins import-prices` | ua-coins.info | таблиця `{prefix}coin_prices`, `source=ua-coins.info` (щоденна історія цін) |
-| `wp nbuarchive import-prices` | coins.bank.gov.ua (архів магазину НБУ) | таблиця `{prefix}coin_prices`, `source=coins.bank.gov.ua` (одна "остання відома" ціна) |
 
-Цей файл — про обидва цінові.
-
-**ua-coins.info має ще один імпортер — окремий Node-сервіс `node-coins-price-parser`** (не в цьому репо, пише в ту саму БД напряму через `mysql2`, без участі WordPress). Він з'явився в migration phase 5 і покриває те саме джерело тим самим алгоритмом матчингу (навіть той самий `--min-score=55` — `similar_text()` там побайтовий порт PHP-версії). `wp uacoins import-prices` лишається робочим — обидва інструменти пишуть в одну таблицю й діляться кешем матчів (постмета `_uacoins_id`/`_uacoins_slug`/`_uacoins_match_score` на `coins`-постах), тож який запускати — байдуже.
+**Ціновий імпорт (ua-coins.info і coins.bank.gov.ua) більше не тут.** Колишні
+`wp uacoins import-prices` / `wp nbuarchive import-prices`
+(`FetchUaCoinsPricesCommand`/`ImportNbuArchivePricesCommand`) видалені —
+їх повністю замінив окремий Node-сервіс
+[`node-coins-price-parser`](../../../../../node-coins-price-parser) (не в
+цьому репо, пише напряму в `{prefix}coin_prices` через `mysql2`, без участі
+WordPress). Це прямий порт того самого алгоритму матчингу (той самий
+`--min-score=55` для ua-coins.info, `similar_text()` — побайтовий порт
+PHP-версії) — решта цього файлу описує саме цей алгоритм і структуру даних,
+які тепер актуальні для node-coins-price-parser, а не для WP-CLI. Дивись
+`node-coins-price-parser/README.md` для актуальних команд запуску.
 
 ---
 
-## Джерело 1: ua-coins.info (`wp uacoins import-prices`)
+## Джерело 1: ua-coins.info
 
 Публічний каталог, окремий сайт, ніяк з нами не пов'язаний. Даних напряму через офіційний API немає, тому пайплайн — по суті контрольований скрапінг двох публічних сторінок на кожну монету:
 
@@ -42,7 +48,7 @@
 
 ---
 
-## Джерело 2: coins.bank.gov.ua — архів магазину НБУ (`wp nbuarchive import-prices`)
+## Джерело 2: coins.bank.gov.ua — архів магазину НБУ
 
 Офіційний онлайн-магазин НБУ, розділ "Архів" (`/arhiv/c-457.html`, ~350 позицій, пагінація `?page=N`). На відміну від ua-coins.info, тут **не історія цін по днях, а одна ціна** — сторінка кожного товару прямо каже: *"Вартість продукції вказана станом на дату останньої реалізації"*. Тобто це радше "остання офіційна ціна продажу", ніж time series.
 
@@ -53,11 +59,11 @@
 **Робочий процес замість цього — напівручний:**
 1. Дані з `/arhiv/c-457.html?page=N` збираються через реальний браузер (Claude в Chrome або людина) — назва товару + ціна + артикул з кожної сторінки архіву.
 2. Зібране складається в JSON: `[{"title": "...", "price": 458, "sku": "8GT"}, ...]`.
-3. `wp nbuarchive import-prices --file=<шлях-до-json>` матчить і пише в БД.
+3. `node index.js nbuarchive --file=<шлях-до-json>` (у `node-coins-price-parser`) матчить і пише в БД.
 
 ### Як зіставляємо монету
 
-На відміну від ua-coins.info (де матчимо проти чужого пошуку), тут матчимо **вхідні title з дампу проти вже наявних `coins`-постів у нашій БД** — усі публікаційні монети завантажуються одним запитом (`load_coins()`), далі порівняння в пам'яті через `similar_text()` (та сама нормалізація — `clean_title()`/`normalize_title()`, дублює логіку `FetchUaCoinsPricesCommand`, спільного класу немає, обидва командні класи самодостатні за конвенцією цього каталогу).
+На відміну від ua-coins.info (де матчимо проти чужого пошуку), тут матчимо **вхідні title з дампу проти вже наявних `coins`-постів у нашій БД** — усі публікаційні монети завантажуються одним запитом, далі порівняння в пам'яті через `similar_text()` (та сама нормалізація, що й для джерела 1 — у `node-coins-price-parser` це `src/matching/titles.js`/`src/matching/similarText.js`, спільні для обох команд `uacoins`/`nbuarchive`).
 
 **Поріг за замовчуванням тут значно вищий — `--min-score=85`** (проти 55 для ua-coins.info). Причина: у каталозі багато шаблонних назв на кшталт `Ролик обігових пам'ятних монет "X" (у ролику 25 монет)`, які відрізняються лише вставкою `X` (назва області/об'єкта) — при порозі 55-60 такі назви хибно матчаться одна на одну (перевірено: "Антонівський міст" проти "Харківська область" дав score 76.8 — вище дефолту ua-coins.info, але це геть різні монети). 85 — емпірично підібраний поріг, що відсікає такі колізії, залишаючи тільки справжні майже-точні збіги (94-96% на реальних даних).
 
@@ -83,18 +89,19 @@ GraphQL-поле `Coin.priceHistory` (`inc/GraphQL/CoinGraphQL.php`) → `PriceR
 
 ## Запуск
 
+Обидва — в [`node-coins-price-parser`](../../../../../node-coins-price-parser), не в цьому репо:
+
 ```bash
 # --- ua-coins.info ---
-wp uacoins import-prices --dry-run              # прев'ю без запису в БД
-wp uacoins import-prices --post_id=169           # одна монета
-wp uacoins import-prices                         # весь каталог coins
-wp uacoins import-prices --rematch                # ігнорувати кеш матчингу
-wp uacoins import-prices --min-score=70           # інший поріг схожості
-wp uacoins import-prices --limit=20               # обмежити кількість монет
+node index.js uacoins --dry-run --limit=5   # прев'ю без запису в БД
+node index.js uacoins --coin-id=169         # одна монета
+node index.js uacoins                       # весь каталог coins
+node index.js uacoins --rematch             # ігнорувати кеш матчингу
+node index.js uacoins --min-score=70        # інший поріг схожості
 
 # --- coins.bank.gov.ua (архів) ---
-wp nbuarchive import-prices --file=archive.json --dry-run
-wp nbuarchive import-prices --file=archive.json
-wp nbuarchive import-prices --file=archive.json --price-date=2026-08-27
-wp nbuarchive import-prices --file=archive.json --min-score=90
+node index.js nbuarchive --file=archive.json --dry-run
+node index.js nbuarchive --file=archive.json
+node index.js nbuarchive --file=archive.json --price-date=2026-08-27
+node index.js nbuarchive --file=archive.json --min-score=90
 ```

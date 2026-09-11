@@ -14,21 +14,9 @@ wp nbu parse-souvenir --pages=all
 wp nbu parse-souvenir --pages=1-3 --per-page=100
 wp nbu parse-souvenir --pages=1 --per-page=5 --limit=1
 wp nbu parse-souvenir --pages=1 --dry-run   # preview without writing to DB
-
-# Import coin price history from ua-coins.info into the coin_price CPT
-wp uacoins import-prices                    # whole coins catalog
-wp uacoins import-prices --post_id=169      # single coin
-wp uacoins import-prices --dry-run          # preview without writing to DB
-wp uacoins import-prices --rematch --min-score=70
-
-# Import prices from a coins.bank.gov.ua (NBU shop archive) JSON dump — that
-# site is behind a JS proof-of-work anti-bot challenge (Bunny Shield), so the
-# data has to be collected via a real browser first, not fetched by this command
-wp nbuarchive import-prices --file=archive.json --dry-run
-wp nbuarchive import-prices --file=archive.json
 ```
 
-All three commands are only registered when `WP_CLI` is defined (see `functions.php`). No manual `require_once` needed — autoloader handles it. `FetchUaCoinsPricesCommand` and `ImportNbuArchivePricesCommand` are documented in detail in `inc/Console/README.md` (sources, title-matching, storage, known gotchas with each upstream site).
+Only registered when `WP_CLI` is defined (see `functions.php`), alongside `InstallSchemaCommand`/`MigratePricesCommand` (schema setup/one-off migration for the `coin_prices` table). Price import (ua-coins.info and coins.bank.gov.ua) used to run from here too — `FetchUaCoinsPricesCommand`/`ImportNbuArchivePricesCommand` (`wp uacoins import-prices` / `wp nbuarchive import-prices`) — but that's been retired in favor of the standalone [`node-coins-price-parser`](../../../../node-coins-price-parser) repo, which writes directly into the `coin_prices` MySQL table over `mysql2`, bypassing WordPress entirely (faster than `wp_insert_post`/ACF writes per price point). It's a faithful port of the same title-matching logic; `inc/Console/README.md` still documents the sources/matching/storage rules both tools share.
 
 ## Architecture
 
@@ -48,7 +36,6 @@ All three commands are only registered when `WP_CLI` is defined (see `functions.
 - `Admin\PostTypes\CoinCollectionPostTypeRegistrar` — registers `coin_collection` CPT (admin-only)
 - `Admin\ACFFieldsManager\CoinACFFieldsManager` — ACF fields for `coins`
 - `Admin\ACFFieldsManager\DesignerACFFieldsManager` — ACF fields for `designer`
-- `Admin\ACFFieldsManager\CoinPriceACFFieldsManager` — ACF fields for `coin_price`
 - `Admin\ACFFieldsManager\CoinCollectionACFFieldsManager` — ACF fields for `coin_collection`
 - `Rest\ApiRouter` — registers REST routes via `rest_api_init`
 - `GraphQL\GraphQLRegistrar` — registers GraphQL types/fields/queries/mutations via `graphql_register_types` (only if WPGraphQL is active)
@@ -64,7 +51,7 @@ All three commands are only registered when `WP_CLI` is defined (see `functions.
 
 **CPT `designer`** — linked from coins via ACF relationship field (`designers`). ACF fields: `full_name`, `note`.
 
-**CPT `coin_price`** _(admin-only)_ — historical price entries. ACF fields: `coin_id`, `price_date`, `price`, `source`. Populated by `wp uacoins import-prices` (ua-coins.info) and `wp nbuarchive import-prices` (coins.bank.gov.ua) — one post per `coin_id`+`price_date`+`source`, deduped — see `inc/Console/README.md`.
+**`{prefix}coin_prices` table** (not a CPT) — historical price entries, one row per `coin_id`+`source`+`price_date` (unique key), columns `id`/`coin_id`/`source`/`price_date`/`price`/`sku`/`updated_at` — see `Prices\PriceSchema`/`Prices\PriceRepository`. Replaced the old `coin_price` CPT (post-per-price-point was too slow to import at scale). Populated by the external [`node-coins-price-parser`](../../../../node-coins-price-parser) repo, not by anything in this theme.
 
 **CPT `coin_collection`** _(admin-only)_ — one post per (user, coin) pair in a user's collection. ACF fields: `user_id`, `coin_id`, `quantity`, `purchase_price`.
 

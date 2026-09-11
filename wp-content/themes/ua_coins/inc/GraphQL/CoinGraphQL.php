@@ -6,9 +6,9 @@ use Coins\Prices\PriceRepository;
 
 class CoinGraphQL
 {
-    /** Source tag written by wp uacoins import-prices — see Console/FetchUaCoinsPricesCommand.php */
+    /** Source tag written by the node-coins-price-parser `uacoins` importer (../node-coins-price-parser) */
     private const SOURCE_MARKET = 'ua-coins.info';
-    /** Source tag written by wp nbuarchive import-prices — see Console/ImportNbuArchivePricesCommand.php */
+    /** Source tag written by the node-coins-price-parser `nbuarchive` importer (../node-coins-price-parser) */
     private const SOURCE_NBU = 'coins.bank.gov.ua';
 
     public function registerTypes(): void
