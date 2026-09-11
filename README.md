@@ -4,13 +4,15 @@ WordPress site for the UA Coins numismatic catalog. Application logic lives in
 the theme at `wp-content/themes/ua_coins/` (namespace `Coins\`, PSR-4
 autoloaded).
 
-Part of a three-repo project:
+Part of a multi-repo project:
 
 | Repo | Role |
 | --- | --- |
 | **`wp-numismat`** (this repo) | WordPress backend — GraphQL (`/graphql`) API, content/admin |
 | [`r-numismat`](../r-numismat) | Web app (React/Vite) |
 | [`expo-numismat`](../expo-numismat) | Mobile app (Expo/React Native, iOS/Android) |
+| [`node-coin-telegram-bot`](../node-coin-telegram-bot) | Telegram bot — catalog search, prices, personal collection. GraphQL client, same as the two above |
+| [`node-coins-price-parser`](../node-coins-price-parser) | Standalone price scraper — writes straight into the `{prefix}coin_prices` MySQL table, bypassing WordPress entirely. Its README describes it as replacing the `wp uacoins import-prices` / `wp nbuarchive import-prices` WP-CLI commands below (**not actually reconciled yet** — those commands are still registered in `functions.php` and documented as live in this theme's own README/CLAUDE.md; confirm which one is authoritative in production before trusting either) |
 
 GraphQL (via [WPGraphQL](https://www.wpgraphql.com/)) is the sole data API —
 coins, coin details, price history, per-user collection CRUD. See
