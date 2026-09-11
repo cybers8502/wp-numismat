@@ -1,0 +1,37 @@
+{
+    "name": "cybers8502/wp-numismat",
+    "description": "UA Coins WordPress site - core/plugins are not tracked in git (see .gitignore); this manages them via WPackagist instead",
+    "type": "project",
+    "license": "proprietary",
+    "repositories": [
+        {
+            "type": "composer",
+            "url": "https://wpackagist.org"
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/wp-graphql/wp-graphql-jwt-authentication",
+            "no-api": true
+        }
+    ],
+    "require": {
+        "php": ">=8.1",
+        "composer/installers": "^2.3",
+        "wpackagist-plugin/wp-graphql": "^2.9.1",
+        "wp-graphql/wp-graphql-jwt-authentication": "0.7.0"
+    },
+    "extra": {
+        "installer-paths": {
+            "wp-content/plugins/{$name}/": [
+                "type:wordpress-plugin"
+            ]
+        }
+    },
+    "config": {
+        "allow-plugins": {
+            "composer/installers": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

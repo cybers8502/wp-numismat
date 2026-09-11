@@ -1,0 +1,67 @@
+.idea/
+
+# OS files
+.DS_Store
+
+# Composer
+vendor/
+
+# WordPress config with credentials
+wp-config.php
+.htaccess
+
+debug.log
+
+wp-content/uploads/
+wp-content/debug.log
+
+# WordPress core - identical for any install of a given version, auto-updates.
+# Pin the version in README.md / a manifest instead of tracking the code.
+wp-admin/
+wp-includes/
+index.php
+license.txt
+readme.html
+readme.txt
+wp-activate.php
+wp-blog-header.php
+wp-comments-post.php
+wp-config-sample.php
+wp-cron.php
+wp-links-opml.php
+wp-load.php
+wp-login.php
+wp-mail.php
+wp-settings.php
+wp-signup.php
+wp-trackback.php
+xmlrpc.php
+
+!wp-content/themes/ua_coins/index.php
+
+# Vendor/public plugins (wordpress.org or licensed) - recorded in
+# wp-content/plugins.lock.json instead of tracking the code. No custom,
+# project-written plugins exist in this project (unlike wp-brutmaps) - the
+# theme (wp-content/themes/ua_coins) holds all the custom code instead.
+wp-content/plugins/*
+
+# Database dumps
+*.sql
+*.sql.gz
+
+# Auto-downloaded translation files
+wp-content/languages/
+wp-content/upgrade/
+publish/
+
+# Server access notes, wp-config.php backups, and local secrets
+SERVER.md
+_wp-config.php
+_S_wp-config.php
+.env
+
+# PHP tooling caches
+.phpunit.cache/
+.phpunit.result.cache
+.php-cs-fixer.cache
+.phpcs.cache
