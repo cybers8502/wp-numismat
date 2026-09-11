@@ -1,7 +1,73 @@
 {
+    "name": "cybers8502/ua-coins-theme",
+    "description": "UA Coins WordPress theme",
+    "type": "wordpress-theme",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.1"
+    },
+    "require-dev": {
+        "axepress/wp-graphql-stubs": "^1.16",
+        "brain/monkey": "^2.6",
+        "captainhook/captainhook": "^5.25",
+        "captainhook/hook-installer": "^1.0",
+        "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
+        "php-parallel-lint/php-parallel-lint": "^1.4",
+        "php-stubs/acf-pro-stubs": "^6.0",
+        "php-stubs/wordpress-stubs": "^6.9",
+        "php-stubs/wp-cli-stubs": "^2.10",
+        "phpcompatibility/phpcompatibility-wp": "^2.1",
+        "phpstan/extension-installer": "^1.4",
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^10.5",
+        "squizlabs/php_codesniffer": "^3.10",
+        "szepeviktor/phpstan-wordpress": "^2.0",
+        "wp-coding-standards/wpcs": "^3.1",
+        "yoast/phpunit-polyfills": "^2.0"
+    },
     "autoload": {
         "psr-4": {
             "Coins\\": "inc/"
         }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Coins\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true,
+        "platform": {
+            "php": "8.1.99"
+        },
+        "allow-plugins": {
+            "captainhook/hook-installer": true,
+            "dealerdirect/phpcodesniffer-composer-installer": true,
+            "phpcsstandards/phpcodesniffer-composer-installer": true,
+            "phpstan/extension-installer": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "extra": {
+        "captainhook": {
+            "config": "captainhook.json",
+            "only-enabled": true
+        }
+    },
+    "scripts": {
+        "lint": "parallel-lint --colors inc functions.php bin",
+        "phpcs": "phpcs -q",
+        "phpcbf": "phpcbf",
+        "phpstan": "phpstan analyse --memory-limit=1G",
+        "test": "phpunit",
+        "check": [
+            "@lint",
+            "@phpstan",
+            "@test",
+            "@phpcs"
+        ],
+        "smoke-test": "wp eval-file bin/graphql-smoke-test.php --path=../../.."
     }
 }

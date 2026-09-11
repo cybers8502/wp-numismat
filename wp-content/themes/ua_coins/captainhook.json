@@ -1,0 +1,48 @@
+{
+    "config": {
+        "fail-on-first-error": false
+    },
+    "pre-commit": {
+        "enabled": true,
+        "actions": [
+            {
+                "action": "\\CaptainHook\\App\\Hook\\PHP\\Action\\Linting"
+            },
+            {
+                "action": "wp-content/themes/ua_coins/vendor/bin/phpcs -q --standard=wp-content/themes/ua_coins/phpcs.xml {$STAGED_FILES|of-type:php}",
+                "conditions": [
+                    {
+                        "exec": "\\CaptainHook\\App\\Hook\\Condition\\FileStaged\\OfType",
+                        "args": ["php"]
+                    }
+                ]
+            },
+            {
+                "action": "wp-content/themes/ua_coins/vendor/bin/phpstan analyse --configuration=wp-content/themes/ua_coins/phpstan.neon --no-progress --memory-limit=1G {$STAGED_FILES|of-type:php}",
+                "conditions": [
+                    {
+                        "exec": "\\CaptainHook\\App\\Hook\\Condition\\FileStaged\\OfType",
+                        "args": ["php"]
+                    }
+                ]
+            },
+            {
+                "action": "wp-content/themes/ua_coins/vendor/bin/phpunit --configuration=wp-content/themes/ua_coins/phpunit.xml",
+                "conditions": [
+                    {
+                        "exec": "\\CaptainHook\\App\\Hook\\Condition\\FileStaged\\OfType",
+                        "args": ["php"]
+                    }
+                ]
+            }
+        ]
+    },
+    "pre-push": {
+        "enabled": true,
+        "actions": [
+            {
+                "action": "cd wp-content/themes/ua_coins && composer check"
+            }
+        ]
+    }
+}

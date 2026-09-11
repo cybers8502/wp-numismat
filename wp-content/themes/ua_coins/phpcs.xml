@@ -1,0 +1,53 @@
+<?xml version="1.0"?>
+<ruleset name="UACoins">
+    <description>Coding standards for the ua_coins theme.</description>
+
+    <file>functions.php</file>
+    <file>inc</file>
+    <file>tests</file>
+    <file>bin</file>
+
+    <exclude-pattern>*/vendor/*</exclude-pattern>
+    <exclude-pattern>*/node_modules/*</exclude-pattern>
+    <exclude-pattern>*/publish/*</exclude-pattern>
+
+    <arg name="basepath" value="."/>
+    <arg name="extensions" value="php"/>
+    <arg name="parallel" value="8"/>
+    <arg name="cache" value=".phpcs.cache"/>
+    <arg value="sp"/>
+    <arg name="colors"/>
+
+    <config name="testVersion" value="8.1-"/>
+    <config name="minimum_wp_version" value="6.0"/>
+
+    <!-- Base style: PSR-12. Line length is advisory only here, not enforced. -->
+    <rule ref="PSR12">
+        <exclude name="Generic.Files.LineLength"/>
+    </rule>
+
+    <!-- Security- and DB-focused WordPress sniffs. NonceVerification is dropped:
+         GraphQL/REST routes gate on app-token/JWT auth, not WP nonces, so it
+         only produces false positives here. -->
+    <rule ref="WordPress.Security">
+        <exclude name="WordPress.Security.NonceVerification"/>
+    </rule>
+    <rule ref="WordPress.DB.PreparedSQL"/>
+    <rule ref="WordPress.DB.PreparedSQLPlaceholders"/>
+    <rule ref="WordPress.WP.I18n">
+        <properties>
+            <property name="text_domain" type="array">
+                <element value="ua_coins"/>
+            </property>
+        </properties>
+    </rule>
+
+    <!-- PHP cross-version compatibility -->
+    <rule ref="PHPCompatibilityWP"/>
+
+    <!-- Tests and CLI scripts may echo and skip escaping/nonce checks -->
+    <rule ref="WordPress.Security">
+        <exclude-pattern>tests/*</exclude-pattern>
+        <exclude-pattern>bin/*</exclude-pattern>
+    </rule>
+</ruleset>

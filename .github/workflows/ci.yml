@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: wp-content/themes/ua_coins
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php-version: ['8.1', '8.4']
+
+    name: check (PHP ${{ matrix.php-version }})
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          tools: composer:v2
+          coverage: none
+
+      - name: Install dependencies
+        uses: ramsey/composer-install@v3
+        with:
+          working-directory: wp-content/themes/ua_coins
+
+      - name: Lint
+        if: ${{ !cancelled() }}
+        run: composer lint
+
+      - name: PHPStan
+        if: ${{ !cancelled() }}
+        run: composer phpstan
+
+      - name: PHPUnit
+        if: ${{ !cancelled() }}
+        run: composer test
+
+      - name: PHPCS
+        if: ${{ !cancelled() }}
+        run: composer phpcs
