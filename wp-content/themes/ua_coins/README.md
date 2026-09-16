@@ -43,6 +43,23 @@ wp nbu parse-souvenir --pages=1 --dry-run
 
 ---
 
+## WP-CLI — бекфіл років (`coin_year`)
+
+```bash
+# Подивитись, що зміниться, без запису
+wp coins backfill-years --dry-run
+
+# Проставити терміни
+wp coins backfill-years
+
+# Менші пачки (за замовчуванням 500 постів на прохід)
+wp coins backfill-years --batch=100
+```
+
+Проставляє кожній опублікованій монеті термін `coin_year` з року її `issue_date`. Потрібен **один раз** — після деплою таксономії, щоб усі старі пости отримали рік; далі `FetchNbuDataCommand` робить це сам на імпорті. Ідемпотентна: монета, що вже має правильний термін, не перезаписується, тож повторний запуск дешевий і безпечний. Монети без розбірного `issue_date` пропускаються з попередженням, а не вгадуються з `post_date` (для створених вручну постів це дата створення, а не випуску — і монета потрапила б не в той рік).
+
+---
+
 ## Імпорт цін
 
 Ціни (`ua-coins.info` та `coins.bank.gov.ua`) більше не імпортуються звідси —
@@ -73,11 +90,14 @@ node-coins-price-parser є їх прямим портом (той самий м�
 | Diameter | `coin_diameter` | flat |
 | Mintage declared | `coin_mintage_declared` | flat |
 | Mintage actual | `coin_mintage_actual` | flat |
+| Year | `coin_year` | flat |
 | Color | `coin_color` | flat |
 | Packaging | `coin_packaging` | flat |
 | Type | `coin_type` | flat |
 
 ACF-поля: `issue_date`, `diameter_mm`, `mintage_declared`, `mintage_actual`, `booklet_url`, `description_html` (wysiwyg), `designers` (relationship), `images_gallery`
+
+`coin_year` дублює **рік** з `issue_date` окремим терміном — так само, як `coin_diameter`/`coin_mintage_*` дублюють свої числові ACF-поля. Сенс той самий: клієнт отримує список років, які реально є в каталозі (`coinYears(where: {hideEmpty: true})`, разом з `count`), і фільтрує по них через `tax_query`, замість вгадувати діапазон по min/max. Термін проставляє `FetchNbuDataCommand` при кожному імпорті/оновленні; для постів, створених до появи таксономії, є `wp coins backfill-years` (див. нижче).
 
 Фіксовані терміни `coin_color`: `Кольорова`, `Некольорова`
 Фіксовані терміни `coin_packaging`: `Без пакування`, `В сувенірному пакуванні`, `Набір`, `Ролик`

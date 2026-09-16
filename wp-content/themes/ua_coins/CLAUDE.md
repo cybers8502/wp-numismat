@@ -14,9 +14,14 @@ wp nbu parse-souvenir --pages=all
 wp nbu parse-souvenir --pages=1-3 --per-page=100
 wp nbu parse-souvenir --pages=1 --per-page=5 --limit=1
 wp nbu parse-souvenir --pages=1 --dry-run   # preview without writing to DB
+
+# One-time backfill of the coin_year term (from issue_date) for posts that
+# predate the taxonomy — the importer does it inline for everything it touches.
+wp coins backfill-years --dry-run
+wp coins backfill-years
 ```
 
-Only registered when `WP_CLI` is defined (see `functions.php`), alongside `InstallSchemaCommand`/`MigratePricesCommand` (schema setup/one-off migration for the `coin_prices` table). Price import (ua-coins.info and coins.bank.gov.ua) used to run from here too — `FetchUaCoinsPricesCommand`/`ImportNbuArchivePricesCommand` (`wp uacoins import-prices` / `wp nbuarchive import-prices`) — but that's been retired in favor of the standalone [`node-coins-price-parser`](../../../../node-coins-price-parser) repo, which writes directly into the `coin_prices` MySQL table over `mysql2`, bypassing WordPress entirely (faster than `wp_insert_post`/ACF writes per price point). It's a faithful port of the same title-matching logic; `inc/Console/README.md` still documents the sources/matching/storage rules both tools share.
+Only registered when `WP_CLI` is defined (see `functions.php`), alongside `InstallSchemaCommand`/`MigratePricesCommand` (schema setup/one-off migration for the `coin_prices` table) and `BackfillCoinYearsCommand`. Price import (ua-coins.info and coins.bank.gov.ua) used to run from here too — `FetchUaCoinsPricesCommand`/`ImportNbuArchivePricesCommand` (`wp uacoins import-prices` / `wp nbuarchive import-prices`) — but that's been retired in favor of the standalone [`node-coins-price-parser`](../../../../node-coins-price-parser) repo, which writes directly into the `coin_prices` MySQL table over `mysql2`, bypassing WordPress entirely (faster than `wp_insert_post`/ACF writes per price point). It's a faithful port of the same title-matching logic; `inc/Console/README.md` still documents the sources/matching/storage rules both tools share.
 
 ## Architecture
 
@@ -44,8 +49,10 @@ Only registered when `WP_CLI` is defined (see `functions.php`), alongside `Insta
 ## Data Model
 
 **CPT `coins`** with taxonomies:
-- `coin_denomination`, `coin_quality`, `coin_material`, `coin_series`, `coin_edge`, `coin_diameter`, `coin_mintage_declared`, `coin_mintage_actual`
+- `coin_denomination`, `coin_quality`, `coin_material`, `coin_series`, `coin_edge`, `coin_diameter`, `coin_mintage_declared`, `coin_mintage_actual`, `coin_year`
 - `coin_color`, `coin_packaging`, `coin_type`
+
+Several taxonomies deliberately **mirror an ACF field as terms**: `coin_diameter` ← `diameter_mm`, `coin_mintage_declared`/`coin_mintage_actual` ← their meta of the same name, and `coin_year` ← the year part of `issue_date`. The ACF field stays the exact display value; the term exists so clients can list what actually occurs in the catalog (`hideEmpty` + `count`) and filter with `tax_query`, which plain meta can't do efficiently. `FetchNbuDataCommand::fill_meta_acf()` assigns all of them on import — if you add another mirrored facet, assign it there too, and ship a backfill command for the posts that predate it (see `BackfillCoinYearsCommand`). Note none of them re-sync when an editor changes the ACF field in wp-admin; they're import-time only, which is a known gap shared by every mirrored facet.
 
 **ACF fields on `coins`:** `issue_date`, `diameter_mm`, `quality`, `edge`, `designers` (relationship to `designer` CPT), `mintage_declared`, `mintage_actual`, `booklet_url`, `description_html` (wysiwyg), `images_gallery`
 

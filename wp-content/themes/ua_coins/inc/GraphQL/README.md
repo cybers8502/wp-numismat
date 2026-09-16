@@ -11,6 +11,7 @@
 | Клас | Відповідає за |
 |---|---|
 | `CoinGraphQL` | Типи `CoinGalleryImage`/`CoinPriceEntry`/`CoinPriceStats`; поля на `Coin` (ACF): `issueDate`, `bookletUrl`, `descriptionHtml`, `diameterMm`, `mintageDeclared`, `mintageActual`, `gallery`, `designersArtist/Designer/Adaptation/Sculptor`, `priceHistory`, `priceStats(days: Int)` |
+| `CatalogGraphQL` | Тип `CatalogCounts`; root query `catalogCounts(search, typeSlug, denominations, excludedDenominations, materials, excludedMaterials, years, excludedYears)` → `{ matched, total }` одним `WP_Query` (`tax_query` + `found_posts`) для рядка «Показано N з M». Стандартна конекція `coins` не має ні агрегату, ні `taxQuery`, тому лічильник рахується тут, а не клієнтом по вже завантаженій сторінці |
 | `DesignerGraphQL` | Поля на `Designer`: `fullName`, `note` |
 | `CollectionGraphQL` | Типи `CollectionItem`/`CollectionStats`/`AddToCollectionPayload`/`DeleteCollectionItemPayload`; queries `myCollection`, `myCollectionStats`; мутації `addToCollection`, `updateCollectionItem`, `deleteCollectionItem` |
 | `AuthGraphQL` | Мутація `logout` (ревокація JWT-секрету). `refreshJwtAuthToken`/`login`/`register` реєструє плагін `wp-graphql-jwt-authentication`, не ця тема |

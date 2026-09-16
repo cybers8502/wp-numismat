@@ -430,6 +430,7 @@ class FetchNbuDataCommand
         $this->assign_taxonomy_single($post_id, 'coin_diameter', $item['diameter_mm'] ?? null);
         $this->assign_taxonomy_single($post_id, 'coin_mintage_declared', $item['mintage_declared'] ?? null);
         $this->assign_taxonomy_single($post_id, 'coin_mintage_actual', $item['mintage_actual'] ?? null);
+        $this->assign_taxonomy_single($post_id, 'coin_year', self::year_from_date($item['issue_date'] ?? null));
 
         // Тип — монета чи банкнота
         $type = $this->detect_type($item['title'] ?? '');
@@ -825,6 +826,27 @@ class FetchNbuDataCommand
         if ($term_id) {
             wp_set_post_terms($post_id, [$term_id], $taxonomy, false);
         }
+    }
+
+    /**
+     * Year part of an `issue_date` — the term value for the coin_year taxonomy. Shared with
+     * BackfillCoinYearsCommand so an imported coin and a backfilled one land on the exact same term.
+     *
+     * Accepts both storage shapes on purpose. This importer writes `Y-m-d` (normalize_date_ua()),
+     * but `issue_date` is an ACF date_picker, and saving one through wp-admin stores raw `Ymd` —
+     * so a coin edited by hand has a different meta value than an imported one. get_field() hides
+     * that (it formats to the field's `return_format`), but the backfill reads raw meta via $wpdb
+     * for speed, and would otherwise silently skip every hand-edited coin.
+     *
+     * The 19xx/20xx guard rejects the empty-date artifacts that turn up in date columns
+     * ("0000-00-00") rather than minting a bogus "0000" term into everyone's year filter.
+     */
+    public static function year_from_date(?string $issue_date): ?string
+    {
+        if (!preg_match('~^((?:19|20)\d{2})(?:-\d{2}-\d{2}|\d{4})~', trim((string) $issue_date), $m)) {
+            return null;
+        }
+        return $m[1];
     }
 
     protected function strip_metal_mark(?string $title): ?string

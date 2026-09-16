@@ -80,6 +80,17 @@ class CoinPostTypeRegistrar
                 'graphql_single_name' => 'coinEdge',
                 'graphql_plural_name' => 'coinEdges',
             ],
+            // Mirrors the year of the `issue_date` ACF field as a real term, the same way
+            // coin_diameter/coin_mintage_* mirror their own numeric ACF fields — so clients can
+            // list the years that actually exist (with counts, hideEmpty) and filter by them via
+            // tax_query, instead of guessing a range from min/max. Assigned by
+            // FetchNbuDataCommand on import; backfill existing posts with `wp coins backfill-years`.
+            'coin_year' => [
+                'label'               => 'Year',
+                'hierarchical'        => false,
+                'graphql_single_name' => 'coinYear',
+                'graphql_plural_name' => 'coinYears',
+            ],
             'coin_diameter' => [
                 'label'               => 'Diameter',
                 'hierarchical'        => false,

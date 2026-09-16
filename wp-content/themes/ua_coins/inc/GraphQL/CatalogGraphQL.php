@@ -8,6 +8,7 @@ class CatalogGraphQL
     private const TAX_TYPE         = 'coin_type';
     private const TAX_DENOMINATION = 'coin_denomination';
     private const TAX_MATERIAL     = 'coin_material';
+    private const TAX_YEAR         = 'coin_year';
 
     public function registerTypes(): void
     {
@@ -35,8 +36,9 @@ class CatalogGraphQL
             'type'        => 'CatalogCounts',
             'description' => 'Matched vs. total coin counts for the catalog screen\'s counter line. '
                 . 'Filters mirror CatalogScreen\'s client-side facets (type, denomination, material, '
-                . 'search) — year is intentionally not supported here, it has no indexed/queryable '
-                . 'field to filter on server-side, same as the rest of the catalog\'s filtering.',
+                . 'year, search). Year became filterable here once the coin_year taxonomy was added '
+                . '(it mirrors the issue_date ACF field as a real term) — before that it had no '
+                . 'indexed/queryable field to filter on server-side.',
             'args'        => [
                 'search' => [
                     'type'        => 'String',
@@ -61,6 +63,14 @@ class CatalogGraphQL
                 'excludedMaterials' => [
                     'type'        => ['list_of' => 'String'],
                     'description' => 'Excluded coin_material slugs.',
+                ],
+                'years' => [
+                    'type'        => ['list_of' => 'String'],
+                    'description' => 'Included coin_year slugs, e.g. "2024" (OR\'d together).',
+                ],
+                'excludedYears' => [
+                    'type'        => ['list_of' => 'String'],
+                    'description' => 'Excluded coin_year slugs.',
                 ],
             ],
             'resolve' => [$this, 'resolveCatalogCounts'],
@@ -90,6 +100,8 @@ class CatalogGraphQL
      *   excludedDenominations?: string[]|null,
      *   materials?: string[]|null,
      *   excludedMaterials?: string[]|null,
+     *   years?: string[]|null,
+     *   excludedYears?: string[]|null,
      * } $args
      */
     private function countCoins(array $args): int
@@ -136,6 +148,24 @@ class CatalogGraphQL
                 'taxonomy' => self::TAX_MATERIAL,
                 'field'    => 'slug',
                 'terms'    => $args['excludedMaterials'],
+                'operator' => 'NOT IN',
+            ];
+        }
+
+        if (!empty($args['years'])) {
+            $tax_query[] = [
+                'taxonomy' => self::TAX_YEAR,
+                'field'    => 'slug',
+                'terms'    => $args['years'],
+                'operator' => 'IN',
+            ];
+        }
+
+        if (!empty($args['excludedYears'])) {
+            $tax_query[] = [
+                'taxonomy' => self::TAX_YEAR,
+                'field'    => 'slug',
+                'terms'    => $args['excludedYears'],
                 'operator' => 'NOT IN',
             ];
         }
