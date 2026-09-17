@@ -17,6 +17,11 @@ class App
         // admin's ordering through to the apps.
         (new Taxonomy\TermOrderService())->boot();
 
+        // Also not admin-only: these denormalised meta keys are what the catalog's server-side
+        // table sort orders by, and they have to stay current on every write path (admin save,
+        // importer, price run), not just when someone is looking at wp-admin.
+        (new Catalog\SortKeyService())->boot();
+
         $this->bootAdmin();
         $this->bootRestApi();
         $this->bootGraphQL();

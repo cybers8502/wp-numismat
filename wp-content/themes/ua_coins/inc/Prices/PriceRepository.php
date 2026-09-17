@@ -122,6 +122,16 @@ class PriceRepository
             }
         }
 
+        // Lets SortKeyService refresh `_sort_price` for every coin whose latest price may have
+        // moved. The catalog table orders on that meta, so without this an import would leave the
+        // "Вартість" column sorted on the prices it held before the run.
+        if ($sent > 0) {
+            do_action(
+                \Coins\Catalog\SortKeyService::ACTION_PRICES_UPSERTED,
+                array_values(array_unique(array_map(static fn($r) => (int) $r['coin_id'], $rows)))
+            );
+        }
+
         return $sent;
     }
 
