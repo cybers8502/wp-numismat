@@ -15,7 +15,10 @@
 | `DesignerGraphQL` | Поля на `Designer`: `fullName`, `note` |
 | `CollectionGraphQL` | Типи `CollectionItem`/`CollectionStats`/`AddToCollectionPayload`/`DeleteCollectionItemPayload`; queries `myCollection`, `myCollectionStats`; мутації `addToCollection`, `updateCollectionItem`, `deleteCollectionItem` |
 | `AuthGraphQL` | Мутація `logout` (ревокація JWT-секрету). `refreshJwtAuthToken`/`login`/`register` реєструє плагін `wp-graphql-jwt-authentication`, не ця тема |
+| `TaxonomyGraphQL` | Поле `termOrder: Int` на кожному типі терміна монетних таксономій (`CoinMaterial`, `CoinYear`, `CoinDenomination`, …) — позиція, задана в адмінці (метаполе `coin_term_order`, див. `Coins\Taxonomy\TermOrderService` і розділ «Порядок термінів» у кореневому README) |
 | `GraphQLRegistrar` | Оркестратор — викликає `registerTypes()` кожного класу на хук `graphql_register_types` |
+
+**Порядок термінів.** Будь-який список термінів монетних таксономій (`coinMaterials`, `coinYears`, `coinDenominations`, …, а також терміни всередині монети — `coin { coinDenominations { nodes } }`) уже приходить у порядку, заданому в адмінці: `TermOrderService` підміняє сортування за замовчуванням на рівні `WP_Term_Query` (хук `terms_clauses`), а не в GraphQL. Клієнту сортувати не треба й не варто. Явний `where: { orderby: ... }` має пріоритет і працює як раніше; терміни без заданої позиції йдуть у кінці, за назвою. Поле `termOrder` віддає саму позицію (`null` = не задана) — воно потрібне лише клієнту, який має власне сортування й хоче зрозуміти, чи можна його вимкнути.
 
 Кожен клас має один публічний вхід `registerTypes(): void`. Всередині — приватні методи для типів (`registerSharedTypes`), полів/queries/мутацій, а резолвери — публічні методи цього ж класу (`resolveX`), на які посилаються через `[$this, 'resolveX']`.
 

@@ -19,9 +19,16 @@ wp nbu parse-souvenir --pages=1 --dry-run   # preview without writing to DB
 # predate the taxonomy — the importer does it inline for everything it touches.
 wp coins backfill-years --dry-run
 wp coins backfill-years
+
+# One-time starting sort position (coin_term_order term meta) for taxonomy
+# terms — see "Term ordering" below. Idempotent: a term that already has a
+# position keeps it unless --force.
+wp coins backfill-term-order --dry-run
+wp coins backfill-term-order
+wp coins backfill-term-order --taxonomy=coin_year
 ```
 
-Only registered when `WP_CLI` is defined (see `functions.php`), alongside `InstallSchemaCommand`/`MigratePricesCommand` (schema setup/one-off migration for the `coin_prices` table) and `BackfillCoinYearsCommand`. Price import (ua-coins.info and coins.bank.gov.ua) used to run from here too — `FetchUaCoinsPricesCommand`/`ImportNbuArchivePricesCommand` (`wp uacoins import-prices` / `wp nbuarchive import-prices`) — but that's been retired in favor of the standalone [`node-coins-price-parser`](../../../../node-coins-price-parser) repo, which writes directly into the `coin_prices` MySQL table over `mysql2`, bypassing WordPress entirely (faster than `wp_insert_post`/ACF writes per price point). It's a faithful port of the same title-matching logic; `inc/Console/README.md` still documents the sources/matching/storage rules both tools share.
+Only registered when `WP_CLI` is defined (see `functions.php`), alongside `InstallSchemaCommand`/`MigratePricesCommand` (schema setup/one-off migration for the `coin_prices` table), `BackfillCoinYearsCommand` and `BackfillTermOrderCommand`. Price import (ua-coins.info and coins.bank.gov.ua) used to run from here too — `FetchUaCoinsPricesCommand`/`ImportNbuArchivePricesCommand` (`wp uacoins import-prices` / `wp nbuarchive import-prices`) — but that's been retired in favor of the standalone [`node-coins-price-parser`](../../../../node-coins-price-parser) repo, which writes directly into the `coin_prices` MySQL table over `mysql2`, bypassing WordPress entirely (faster than `wp_insert_post`/ACF writes per price point). It's a faithful port of the same title-matching logic; `inc/Console/README.md` still documents the sources/matching/storage rules both tools share.
 
 ## Architecture
 
@@ -35,7 +42,8 @@ Only registered when `WP_CLI` is defined (see `functions.php`), alongside `Insta
 - `Security\ApiGuardService` — anon app-token + rate-limit gate on `/graphql`
 - `Admin\ThemeSetupService` — theme support (post-thumbnails)
 - `Admin\AdminMenuManager` — WP admin menu customization
-- `Admin\PostTypes\CoinPostTypeRegistrar` — registers `coins` CPT + coin taxonomies
+- `Taxonomy\TermOrderService` — admin-controlled term order (see "Term ordering" below). Booted outside `bootAdmin()` on purpose: the drag-and-drop UI is only half of it, the other half re-sorts term queries on the public API
+- `Admin\PostTypes\CoinPostTypeRegistrar` — registers `coins` CPT + coin taxonomies (`CoinPostTypeRegistrar::taxonomies()` is the shared source of truth for which taxonomies are coin facets)
 - `Admin\PostTypes\DesignerPostTypeRegistrar` — registers `designer` CPT
 - `Admin\PostTypes\CoinPricePostTypeRegistrar` — registers `coin_price` CPT (admin-only)
 - `Admin\PostTypes\CoinCollectionPostTypeRegistrar` — registers `coin_collection` CPT (admin-only)
@@ -53,6 +61,16 @@ Only registered when `WP_CLI` is defined (see `functions.php`), alongside `Insta
 - `coin_color`, `coin_packaging`, `coin_type`
 
 Several taxonomies deliberately **mirror an ACF field as terms**: `coin_diameter` ← `diameter_mm`, `coin_mintage_declared`/`coin_mintage_actual` ← their meta of the same name, and `coin_year` ← the year part of `issue_date`. The ACF field stays the exact display value; the term exists so clients can list what actually occurs in the catalog (`hideEmpty` + `count`) and filter with `tax_query`, which plain meta can't do efficiently. `FetchNbuDataCommand::fill_meta_acf()` assigns all of them on import — if you add another mirrored facet, assign it there too, and ship a backfill command for the posts that predate it (see `BackfillCoinYearsCommand`). Note none of them re-sync when an editor changes the ACF field in wp-admin; they're import-time only, which is a known gap shared by every mirrored facet.
+
+### Term ordering (`coin_term_order`)
+
+Terms of every coin taxonomy carry an optional integer position in term meta (`coin_term_order`), edited in wp-admin by dragging rows on the taxonomy screen (the handle in the "Порядок" column) or by typing an exact number into the term's edit form. `Taxonomy\TermOrderService` then makes that the **default sort of every term query** via `terms_clauses` — i.e. inside `WP_Term_Query`, not inside GraphQL — so one ordering shows up in the GraphQL root listings (`coinMaterials`, `coinYears`, …), in a coin's own term connections (`wp_get_object_terms`), and in the admin list table alike. Clients don't sort: `expo-numismat`/`r-numismat` send no `orderby` at all, WPGraphQL fills in its own `name`/ASC default, and that exact "caller has no preference" case is what gets rewritten.
+
+- An **explicit** `orderby` is left alone — `where: { orderby: COUNT }`, an admin clicking a sortable column, a plugin asking for `term_id`.
+- Terms with no stored position sort **last**, by name, so nothing looks different until someone actually reorders something.
+- Defaults come from `TermOrderService::defaultSortKey()`, shared by everything that seeds: years newest-first; `coin_denomination`/`coin_diameter`/`coin_mintage_*` by numeric value (by name, "10 грн" sorts before "2 грн"); `coin_type`/`coin_color`/`coin_packaging` in `CoinPostTypeRegistrar::fixedTerms()`' declared order (Монета first, where the alphabet says Банкнота); everything else by name. `BackfillTermOrderCommand` writes them for an existing install, `created_term` for a new year term, and `seedFixedTerms()` at the moment it inserts a fixed term. All of them go through `seedDefaultOrder()`, which only writes when the term has no position yet — a manual ordering can't be clobbered.
+- `GraphQL\TaxonomyGraphQL` adds a `termOrder: Int` field to every coin term type. It exists for clients that had their own sort to unlearn (expo-numismat sorted years newest-first client-side), not because reading the list in order needs it.
+- The ordering SQL LEFT JOINs `termmeta` and orders by `COALESCE(CAST(meta_value AS SIGNED), 999999)`, which MySQL rejects under `ONLY_FULL_GROUP_BY` for the `DISTINCT` variants of the term query (`object_ids`, `meta_query`). That's fine because `wpdb` strips `ONLY_FULL_GROUP_BY` from the session — the same reason core's own `ORDER BY t.name` works there — but it's the thing to look at if term queries ever start erroring with "incompatible with DISTINCT".
 
 **ACF fields on `coins`:** `issue_date`, `diameter_mm`, `quality`, `edge`, `designers` (relationship to `designer` CPT), `mintage_declared`, `mintage_actual`, `booklet_url`, `description_html` (wysiwyg), `images_gallery`
 
@@ -75,6 +93,7 @@ Registered from `GraphQLRegistrar::register()`, hooked on `graphql_register_type
 - `DesignerGraphQL` — extra fields on `Designer` (`fullName`, `note`)
 - `CollectionGraphQL` — object types `CollectionItem`/`CollectionStats`/`AddToCollectionPayload`/`DeleteCollectionItemPayload`; root queries `myCollection`, `myCollectionStats`; mutations `addToCollection`, `updateCollectionItem`, `deleteCollectionItem`
 - `AuthGraphQL` — mutation `logout` (JWT secret revocation; `refreshJwtAuthToken` comes from the wp-graphql-jwt-authentication plugin, not this theme)
+- `TaxonomyGraphQL` — `termOrder` on every coin term type (`CoinMaterial`, `CoinYear`, …), reading the `coin_term_order` meta behind admin-controlled facet ordering
 
 Collection mutations/queries throw `\GraphQL\Error\UserError` for auth/ownership failures (logged in + `coin_collection.user_id` must match the current user — see `CollectionGraphQL::authorizeItem()`).
 

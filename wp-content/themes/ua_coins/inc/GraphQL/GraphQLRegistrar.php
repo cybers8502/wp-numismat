@@ -16,5 +16,6 @@ class GraphQLRegistrar
         (new CollectionGraphQL())->registerTypes();
         (new AuthGraphQL())->registerTypes();
         (new CatalogGraphQL())->registerTypes();
+        (new TaxonomyGraphQL())->registerTypes();
     }
 }

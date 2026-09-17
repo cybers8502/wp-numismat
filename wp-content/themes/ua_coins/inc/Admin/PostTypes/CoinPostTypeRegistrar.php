@@ -2,6 +2,8 @@
 
 namespace Coins\Admin\PostTypes;
 
+use Coins\Taxonomy\TermOrderService;
+
 class CoinPostTypeRegistrar
 {
     public function boot(): void
@@ -47,9 +49,18 @@ class CoinPostTypeRegistrar
         ]);
     }
 
-    public function registerCoinTaxonomies(): void
+    /**
+     * Every taxonomy registered against the `coins` post type, keyed by slug.
+     *
+     * Public/static because it's the single source of truth for "which taxonomies are coin
+     * facets" — `Taxonomy\TermOrderService` (manual term ordering) and `GraphQL\TaxonomyGraphQL`
+     * (the `termOrder` field) both read it rather than keeping their own copy of the list.
+     *
+     * @return array<string,array{label:string,hierarchical:bool,graphql_single_name:string,graphql_plural_name:string}>
+     */
+    public static function taxonomies(): array
     {
-        $taxonomies = [
+        return [
             'coin_denomination' => [
                 'label'               => 'Denomination',
                 'hierarchical'        => false,
@@ -128,8 +139,11 @@ class CoinPostTypeRegistrar
                 'graphql_plural_name' => 'coinTypes',
             ],
         ];
+    }
 
-        foreach ($taxonomies as $slug => $config) {
+    public function registerCoinTaxonomies(): void
+    {
+        foreach (self::taxonomies() as $slug => $config) {
             register_taxonomy($slug, ['coins'], [
                 'label'               => $config['label'],
                 'public'              => true,
@@ -144,9 +158,19 @@ class CoinPostTypeRegistrar
         }
     }
 
-    public function seedFixedTerms(): void
+    /**
+     * Taxonomies whose full set of terms is known up front, in the order they should be offered.
+     *
+     * The listed order is itself meaningful — Монета is the type nearly every coin has, and
+     * alphabetical ordering buries it behind Банкнота/Інвестиційна/Медаль — so it doubles as the
+     * default facet order these terms are seeded with (`Taxonomy\TermOrderService`, and
+     * `BackfillTermOrderCommand` for installs whose terms predate that).
+     *
+     * @return array<string,array<int,string>>
+     */
+    public static function fixedTerms(): array
     {
-        $terms = [
+        return [
             'coin_type' => [
                 'Монета',
                 'Банкнота',
@@ -165,11 +189,27 @@ class CoinPostTypeRegistrar
                 'Ролик',
             ],
         ];
+    }
 
-        foreach ($terms as $taxonomy => $labels) {
-            foreach ($labels as $label) {
-                if (!term_exists($label, $taxonomy)) {
-                    wp_insert_term($label, $taxonomy);
+    public function seedFixedTerms(): void
+    {
+        foreach (self::fixedTerms() as $taxonomy => $labels) {
+            foreach ($labels as $index => $label) {
+                if (term_exists($label, $taxonomy)) {
+                    continue;
+                }
+
+                $created = wp_insert_term($label, $taxonomy);
+
+                // Seeded here rather than on every `init` pass: one write per term, ever. Existing
+                // installs — where these terms were inserted long before ordering existed — get
+                // the same positions from `wp coins backfill-term-order`, which reads the list
+                // above for exactly that reason.
+                if (is_array($created)) {
+                    TermOrderService::seedDefaultOrder(
+                        (int) $created['term_id'],
+                        $index * TermOrderService::ORDER_STEP
+                    );
                 }
             }
         }

@@ -12,6 +12,11 @@ class App
         new Security\CorsService();
         new Security\ApiGuardService();
 
+        // Not inside bootAdmin(): the wp-admin drag-and-drop UI is only half of it — the same
+        // service re-sorts every term query on the public GraphQL API, which is what carries the
+        // admin's ordering through to the apps.
+        (new Taxonomy\TermOrderService())->boot();
+
         $this->bootAdmin();
         $this->bootRestApi();
         $this->bootGraphQL();
