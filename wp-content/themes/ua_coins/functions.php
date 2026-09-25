@@ -42,4 +42,5 @@ if (defined('WP_CLI') && WP_CLI) {
     \Coins\Console\BackfillCoinYearsCommand::register();
     \Coins\Console\BackfillTermOrderCommand::register();
     \Coins\Console\BackfillSortKeysCommand::register();
+    \Coins\Console\RepairImagesCommand::register();
 }

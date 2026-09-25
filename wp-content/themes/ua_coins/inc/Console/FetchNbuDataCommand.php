@@ -2,6 +2,7 @@
 
 namespace Coins\Console;
 
+use Coins\Media\NbuImageSource;
 use WP_CLI;
 use WP_Query;
 use WP_Error;
@@ -574,15 +575,21 @@ class FetchNbuDataCommand
 
     protected function find_attachment_by_source_url(string $url): ?int
     {
-        $q = new \WP_Query([
+        // Matched without NBU's `?v=N` cache-buster (see NbuImageSource). The LIKE arm still finds
+        // attachments stored before URLs were normalised, until `wp coins repair-images` has run.
+        $url = NbuImageSource::normalize($url);
+        $q   = new \WP_Query([
             'post_type'      => 'attachment',
             'post_status'    => 'inherit',
             'posts_per_page' => 1,
             'fields'         => 'ids',
-            'meta_query'     => [[
-                'key'   => '_coin_source_url',
-                'value' => $url,
-            ]],
+            'orderby'        => 'ID',
+            'order'          => 'ASC',
+            'meta_query'     => [
+                'relation' => 'OR',
+                ['key' => NbuImageSource::META_KEY, 'value' => $url],
+                ['key' => NbuImageSource::META_KEY, 'value' => $url . '?', 'compare' => 'LIKE'],
+            ],
         ]);
         return !empty($q->posts) ? (int) $q->posts[0] : null;
     }
@@ -606,7 +613,7 @@ class FetchNbuDataCommand
             }
 
             $file_array = [
-                'name'     => basename(parse_url($u, PHP_URL_PATH)),
+                'name'     => NbuImageSource::localFilename($u),
                 'tmp_name' => $tmp,
             ];
 
@@ -617,7 +624,7 @@ class FetchNbuDataCommand
                 continue;
             }
 
-            update_post_meta((int) $id, '_coin_source_url', $u);
+            update_post_meta((int) $id, NbuImageSource::META_KEY, NbuImageSource::normalize($u));
             $ids[] = (int)$id;
         }
         // унікалізація
