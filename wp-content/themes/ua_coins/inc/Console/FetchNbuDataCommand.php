@@ -2,6 +2,7 @@
 
 namespace Coins\Console;
 
+use Coins\Catalog\CoinTitleClassifier;
 use Coins\Media\NbuImageSource;
 use WP_CLI;
 use WP_Query;
@@ -433,13 +434,9 @@ class FetchNbuDataCommand
         $this->assign_taxonomy_single($post_id, 'coin_mintage_actual', $item['mintage_actual'] ?? null);
         $this->assign_taxonomy_single($post_id, 'coin_year', self::year_from_date($item['issue_date'] ?? null));
 
-        // Тип — монета чи банкнота
-        $type = $this->detect_type($item['title'] ?? '');
-        $this->assign_taxonomy_single($post_id, 'coin_type', $type);
-
-        // Пакування — визначаємо за назвою монети
-        $packaging = $this->detect_packaging($item['title'] ?? '');
-        $this->assign_taxonomy_single($post_id, 'coin_packaging', $packaging);
+        // Тип і пакування — за назвою (див. CoinTitleClassifier: упаковка — не тип)
+        $this->assign_taxonomy_single($post_id, 'coin_type', CoinTitleClassifier::type($item['title'] ?? ''));
+        $this->assign_taxonomy_single($post_id, 'coin_packaging', CoinTitleClassifier::packaging($item['title'] ?? ''));
 
         $this->assign_taxonomy_single($post_id, 'coin_color', 'Некольорова');
 
@@ -863,45 +860,6 @@ class FetchNbuDataCommand
         }
         // Прибираємо позначки типу металу в кінці назви: (с), (н), (бм), (з) тощо
         return trim(preg_replace('~\s*\([а-яіїєґa-z]{1,4}\)\s*$~iu', '', $title));
-    }
-
-    protected function detect_type(string $title): string
-    {
-        if (mb_stripos($title, 'сувенір') !== false) {
-            return 'Сувенірна продукція';
-        }
-        if (mb_stripos($title, 'банкнот') !== false) {
-            return 'Банкнота';
-        }
-        if (mb_stripos($title, 'медал') !== false) {
-            return 'Медаль';
-        }
-        if (mb_stripos($title, 'інвестиційн') !== false) {
-            return 'Інвестиційна';
-        }
-        return 'Монета';
-    }
-
-    protected function detect_packaging(string $title): string
-    {
-        $title_lower = mb_strtolower($title, 'UTF-8');
-
-        if (mb_strpos($title_lower, 'набір') !== false) {
-            return 'Набір';
-        }
-
-        if (mb_strpos($title_lower, 'ролик') !== false) {
-            return 'Ролик';
-        }
-
-        if (
-            mb_strpos($title_lower, 'сувенірному пакованн') !== false
-            || mb_strpos($title_lower, 'сувенірному пакуванн') !== false
-        ) {
-            return 'В сувенірному пакуванні';
-        }
-
-        return 'Без пакування';
     }
 
     protected function assign_taxonomy_hierarchical(int $post_id, string $taxonomy, ?string $path): void
