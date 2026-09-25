@@ -3,6 +3,7 @@
 namespace Coins\Console;
 
 use Coins\Catalog\CoinTitleClassifier;
+use Coins\Catalog\ManualOverrides;
 use WP_CLI;
 
 /**
@@ -12,7 +13,7 @@ use WP_CLI;
  * Exists for the rule change that stopped treating souvenir packaging as a type (boxed coins →
  * Монета, souvenir banknotes → Банкнота) and taught packaging the older «у сувенірній упаковці»
  * spelling; the nightly import would get there too, but only for coins NBU still lists. Like the
- * import, it overwrites a type set by hand in wp-admin. Idempotent.
+ * import, it leaves alone a field changed by hand in wp-admin (ManualOverrides). Idempotent.
  */
 class BackfillCoinTypesCommand
 {
@@ -59,6 +60,9 @@ class BackfillCoinTypesCommand
             ];
 
             foreach (self::TAXONOMIES as $taxonomy) {
+                if (ManualOverrides::isLocked((int) $id, $taxonomy)) {
+                    continue;
+                }
                 $current = wp_get_post_terms($id, $taxonomy, ['fields' => 'names']);
                 $current = is_array($current) && $current ? $current[0] : '—';
                 if ($current === $target[$taxonomy]) {

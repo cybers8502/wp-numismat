@@ -3,6 +3,7 @@
 namespace Coins\Console;
 
 use Coins\Catalog\CoinTitleClassifier;
+use Coins\Catalog\ManualOverrides;
 use Coins\Media\NbuImageSource;
 use WP_CLI;
 use WP_Query;
@@ -169,7 +170,7 @@ class FetchNbuDataCommand
                 }
 
                 // Картинки → завантажити і скласти в ACF галерею
-                if (!empty($item['images'])) {
+                if (!empty($item['images']) && !ManualOverrides::isLocked($post_id, 'images_gallery')) {
                     $attachment_ids = $this->download_and_attach_images($item['images'], $post_id);
                     $this->update_acf($post_id, $this->acf_map['images_gallery'], $attachment_ids);
                 }
@@ -408,12 +409,15 @@ class FetchNbuDataCommand
 
     protected function update_post_and_meta(int $post_id, array $item): void
     {
-        $postarr = [
-            'ID'           => $post_id,
-            'post_title'   => $item['title'] ?? get_the_title($post_id),
-            'post_content' => $item['description_html'] ?? get_post_field('post_content', $post_id),
-        ];
-        if (!empty($item['issue_date'])) {
+        $locked  = ManualOverrides::locked($post_id);
+        $postarr = ['ID' => $post_id];
+        if (!in_array('post_title', $locked, true)) {
+            $postarr['post_title'] = $item['title'] ?? get_the_title($post_id);
+        }
+        if (!in_array('description_html', $locked, true)) {
+            $postarr['post_content'] = $item['description_html'] ?? get_post_field('post_content', $post_id);
+        }
+        if (!empty($item['issue_date']) && !in_array('issue_date', $locked, true)) {
             $postarr['post_date']     = $item['issue_date'] . ' 00:00:00';
             $postarr['post_date_gmt'] = get_gmt_from_date($item['issue_date'] . ' 00:00:00');
         }
@@ -423,22 +427,33 @@ class FetchNbuDataCommand
 
     protected function fill_meta_acf(int $post_id, array $item): void
     {
+        // Поля, змінені вручну в адмінці, імпорт не чіпає (див. ManualOverrides)
+        $locked = array_flip(ManualOverrides::locked($post_id));
+        $free   = fn (string $key): bool => !isset($locked[$key]);
+
         // ✅ 1) Facets → taxonomies
-        $this->assign_taxonomy_single($post_id, 'coin_series', $item['series'] ?? null);
-        $this->assign_taxonomy_single($post_id, 'coin_denomination', $item['denomination'] ?? null);
-        $this->assign_taxonomy_single($post_id, 'coin_material', $item['material'] ?? null);
-        $this->assign_taxonomy_single($post_id, 'coin_quality', $item['quality'] ?? null);
-        $this->assign_taxonomy_single($post_id, 'coin_edge', $item['edge'] ?? null);
-        $this->assign_taxonomy_single($post_id, 'coin_diameter', $item['diameter_mm'] ?? null);
-        $this->assign_taxonomy_single($post_id, 'coin_mintage_declared', $item['mintage_declared'] ?? null);
-        $this->assign_taxonomy_single($post_id, 'coin_mintage_actual', $item['mintage_actual'] ?? null);
-        $this->assign_taxonomy_single($post_id, 'coin_year', self::year_from_date($item['issue_date'] ?? null));
-
-        // Тип і пакування — за назвою (див. CoinTitleClassifier: упаковка — не тип)
-        $this->assign_taxonomy_single($post_id, 'coin_type', CoinTitleClassifier::type($item['title'] ?? ''));
-        $this->assign_taxonomy_single($post_id, 'coin_packaging', CoinTitleClassifier::packaging($item['title'] ?? ''));
-
-        $this->assign_taxonomy_single($post_id, 'coin_color', 'Некольорова');
+        $terms = [
+            'coin_series'           => $item['series'] ?? null,
+            'coin_denomination'     => $item['denomination'] ?? null,
+            'coin_material'         => $item['material'] ?? null,
+            'coin_quality'          => $item['quality'] ?? null,
+            'coin_edge'             => $item['edge'] ?? null,
+            'coin_diameter'         => $item['diameter_mm'] ?? null,
+            'coin_mintage_declared' => $item['mintage_declared'] ?? null,
+            'coin_mintage_actual'   => $item['mintage_actual'] ?? null,
+            // Тип і пакування — за назвою (див. CoinTitleClassifier: упаковка — не тип)
+            'coin_type'             => CoinTitleClassifier::type($item['title'] ?? ''),
+            'coin_packaging'        => CoinTitleClassifier::packaging($item['title'] ?? ''),
+            'coin_color'            => 'Некольорова',
+        ];
+        foreach ($terms as $taxonomy => $value) {
+            if ($free($taxonomy)) {
+                $this->assign_taxonomy_single($post_id, $taxonomy, $value);
+            }
+        }
+        if ($free('issue_date')) {
+            $this->assign_taxonomy_single($post_id, 'coin_year', self::year_from_date($item['issue_date'] ?? null));
+        }
 
         // ✅ 2) Designers -> separate post type (per role)
         $roles = ['designers_artist', 'designers_designer', 'designers_adaptation', 'designers_sculptor'];
@@ -449,6 +464,7 @@ class FetchNbuDataCommand
             'designers_sculptor'   => $item['designers_sculptor']   ?? null,
         ]);
         $designer_ids_by_role = [];
+        $roles = array_values(array_filter($roles, $free));
         foreach ($roles as $role) {
             $ids = $this->upsert_designer_posts($names_by_role[$role]);
             $designer_ids_by_role[$role] = $ids;
@@ -456,40 +472,56 @@ class FetchNbuDataCommand
         }
 
         // ✅ 3) meta лишається тільки для "даних", а не фасетів
-        update_post_meta($post_id, 'issue_date', $item['issue_date'] ?? '');
-        update_post_meta($post_id, 'booklet_url', $item['booklet_url'] ?? '');
-        update_post_meta($post_id, 'short_title', $item['short_title'] ?? '');
+        if ($free('issue_date')) {
+            update_post_meta($post_id, 'issue_date', $item['issue_date'] ?? '');
+        }
+        if ($free('booklet_url')) {
+            update_post_meta($post_id, 'booklet_url', $item['booklet_url'] ?? '');
+        }
+        if ($free('short_title')) {
+            update_post_meta($post_id, 'short_title', $item['short_title'] ?? '');
+        }
 
-        if (isset($item['mintage_declared'])) {
+        if (isset($item['mintage_declared']) && $free('coin_mintage_declared')) {
             update_post_meta($post_id, 'mintage_declared', $item['mintage_declared']);
         }
-        if (isset($item['mintage_actual'])) {
+        if (isset($item['mintage_actual']) && $free('coin_mintage_actual')) {
             update_post_meta($post_id, 'mintage_actual', $item['mintage_actual']);
         }
-        if (isset($item['diameter_mm'])) {
+        if (isset($item['diameter_mm']) && $free('coin_diameter')) {
             update_post_meta($post_id, 'diameter_mm', $item['diameter_mm']);
         }
 
         // (необов’язково) якщо хочеш лишити дубль для дебагу — можеш лишити, але для фільтрів вже не треба:
-         update_post_meta($post_id, 'quality', $item['quality'] ?? '');
-         update_post_meta($post_id, 'edge', $item['edge'] ?? '');
+        if ($free('coin_quality')) {
+            update_post_meta($post_id, 'quality', $item['quality'] ?? '');
+        }
+        if ($free('coin_edge')) {
+            update_post_meta($post_id, 'edge', $item['edge'] ?? '');
+        }
 
         // ✅ 4) ACF (якщо є)
         if (function_exists('update_field')) {
-            $this->update_acf($post_id, $this->acf_map['issue_date'], $item['issue_date'] ?? '');
-            $this->update_acf($post_id, $this->acf_map['booklet_url'], $item['booklet_url'] ?? '');
-            $this->update_acf($post_id, $this->acf_map['description_html'], $item['description_html'] ?? '');
+            if ($free('issue_date')) {
+                $this->update_acf($post_id, $this->acf_map['issue_date'], $item['issue_date'] ?? '');
+            }
+            if ($free('booklet_url')) {
+                $this->update_acf($post_id, $this->acf_map['booklet_url'], $item['booklet_url'] ?? '');
+            }
+            if ($free('description_html')) {
+                $this->update_acf($post_id, $this->acf_map['description_html'], $item['description_html'] ?? '');
+            }
             foreach ($roles as $role) {
                 $this->update_acf($post_id, $this->acf_map[$role], $designer_ids_by_role[$role]);
             }
 
-            if (isset($item['mintage_declared'])) {
+            if (isset($item['mintage_declared']) && $free('coin_mintage_declared')) {
                 $this->update_acf($post_id, $this->acf_map['mintage_declared'], $item['mintage_declared']);
             }
-            if (isset($item['mintage_actual'])) {
+            if (isset($item['mintage_actual']) && $free('coin_mintage_actual')) {
                 $this->update_acf($post_id, $this->acf_map['mintage_actual'], $item['mintage_actual']);
             }
-            if (isset($item['diameter_mm'])) {
+            if (isset($item['diameter_mm']) && $free('coin_diameter')) {
                 $this->update_acf($post_id, $this->acf_map['diameter_mm'], $item['diameter_mm']);
             }
         }

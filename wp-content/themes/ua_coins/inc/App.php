@@ -41,6 +41,8 @@ class App
         (new Admin\ACFFieldsManager\CoinACFFieldsManager())->boot();
         (new Admin\ACFFieldsManager\DesignerACFFieldsManager())->boot();
         (new Admin\ACFFieldsManager\CoinCollectionACFFieldsManager())->boot();
+
+        (new Catalog\ManualOverrides())->boot();
     }
 
     private function bootRestApi(): void
