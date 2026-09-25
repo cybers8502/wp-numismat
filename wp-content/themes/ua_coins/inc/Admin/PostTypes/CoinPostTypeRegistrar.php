@@ -11,6 +11,22 @@ class CoinPostTypeRegistrar
         add_action('init', [$this, 'registerPostType']);
         add_action('init', [$this, 'registerCoinTaxonomies']);
         add_action('init', [$this, 'seedFixedTerms'], 20);
+        add_filter('use_block_editor_for_post_type', [$this, 'useClassicEditor'], 10, 2);
+    }
+
+    /**
+     * Coins are edited on the classic screen, not in the block editor. Gutenberg renders ACF's
+     * meta boxes into a hidden `#metaboxes` container and then `appendChild`s them into its own
+     * layout; moving the TinyMCE `<iframe>` of a WYSIWYG field (Description) reloads it blank, so
+     * the Visual tab randomly showed nothing while the Text tab (a plain textarea) had the text —
+     * depending on whether TinyMCE initialised before or after the move. It also ignored the field
+     * group's `acf_after_title` position. No coin content uses blocks.
+     *
+     * `show_in_rest` stays on: this only picks the edit screen.
+     */
+    public function useClassicEditor(bool $useBlockEditor, string $postType): bool
+    {
+        return $postType === 'coins' ? false : $useBlockEditor;
     }
 
     public function registerPostType(): void
