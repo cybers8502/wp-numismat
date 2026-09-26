@@ -822,24 +822,45 @@ class FetchNbuDataCommand
         return $result;
     }
 
+    /** Пробіли стиснуті, без крапки в кінці: «Корень  Лариса» і «Аліса Іванова.» — ті самі люди. */
+    public static function normalize_designer_name(string $name): string
+    {
+        return rtrim(trim((string) preg_replace('~\s+~u', ' ', $name)), '. ');
+    }
+
+    /**
+     * Дизайнер з *точно* таким ім'ям (без урахування регістру — так порівнює колейшн БД). Раніше тут
+     * був пошук `'s' => $name`, тобто LIKE-збіг по частині назви: «Іваненко Святослав» чіплявся до
+     * першого-ліпшого поста, що містить це ім'я (напр. «аверс: Іваненко Святослав; реверс: …»).
+     * Збережені назви нормалізуються так само, як нове ім'я (подвійні пробіли, крапка в кінці).
+     */
+    protected function find_designer_by_name(string $name): int
+    {
+        global $wpdb;
+
+        $id = $wpdb->get_var($wpdb->prepare(
+            "SELECT ID FROM {$wpdb->posts}
+              WHERE post_type = 'designer' AND post_status NOT IN ('trash', 'auto-draft')
+                AND TRIM(TRAILING '.' FROM TRIM(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(post_title, '\r', ' '), '\n', ' '), '\t', ' '), '  ', ' '), '  ', ' '))) = %s
+              ORDER BY ID ASC
+              LIMIT 1",
+            $name
+        ));
+
+        return (int) $id;
+    }
+
     protected function upsert_designer_posts(array $names): array
     {
         $ids = [];
 
         foreach ($names as $name) {
+            $name = self::normalize_designer_name($name);
             if ($name === '') {
                 continue;
             }
 
-            $q = new \WP_Query([
-                'post_type'      => 'designer',
-                'posts_per_page' => 1,
-                'post_status'    => 'any',
-                's'              => $name,
-                'fields'         => 'ids',
-            ]);
-
-            $id = !empty($q->posts) ? (int) $q->posts[0] : 0;
+            $id = $this->find_designer_by_name($name);
 
             if (!$id) {
                 $created = wp_insert_post([
