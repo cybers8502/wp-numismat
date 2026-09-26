@@ -3,8 +3,9 @@
 namespace Coins\Console;
 
 use Coins\Catalog\CoinTitleClassifier;
-use Coins\Catalog\ManualOverrides;
 use Coins\Media\NbuImageSource;
+use Coins\Sync\SyncRunRepository;
+use Coins\Sync\SyncStatus;
 use WP_CLI;
 use WP_Query;
 use WP_Error;
@@ -46,6 +47,12 @@ class FetchNbuDataCommand
                         'optional'    => true,
                         'description' => 'Do not write to DB, just output what would be processed',
                     ],
+                    [
+                        'type'        => 'flag',
+                        'name'        => 'force',
+                        'optional'    => true,
+                        'description' => 'Re-import coins already marked complete too (see SyncStatus)',
+                    ],
                 ],
             ]
         );
@@ -57,6 +64,9 @@ class FetchNbuDataCommand
 
     // Налаштування (під себе)
     protected $post_type = 'coins'; // CPT
+
+    /** @var array<string,int> лічильники поточного запуску → SyncRunRepository */
+    protected $stats = [];
     protected $acf_map = [
         'series'              => 'series',
         'denomination'        => 'denomination',
@@ -77,7 +87,11 @@ class FetchNbuDataCommand
     ];
 
     /**
-     * Запуск: wp nbu parse-souvenir [--pages=<all|N|start-end>] [--perPage=<5|10|25|100>] [--dry-run]
+     * Запуск: wp nbu parse-souvenir [--pages=<all|N|start-end>] [--perPage=<5|10|25|100>] [--dry-run] [--force]
+     *
+     * Існуючу монету оновлює лише поки вона «очікує оновлення» (SyncStatus: бракує фото/даних або
+     * свіжий випуск, чи адмін поставив галочку). Повні монети пропускає — ручні правки лишаються.
+     * `--force` оновлює всі. Кожен запуск (крім --dry-run) пишеться в журнал SyncRunRepository.
      *
      * ## Приклади
      *   wp nbu parse-souvenir --pages=all
@@ -94,15 +108,23 @@ class FetchNbuDataCommand
         }
 
         $dry_run = isset($assoc_args['dry-run']);
+        $force   = isset($assoc_args['force']);
 
         $limit = isset($assoc_args['limit']) ? (int) $assoc_args['limit'] : null;
         if ($limit !== null && $limit < 1) {
             $limit = 1;
         }
 
+        $this->stats = array_fill_keys(SyncRunRepository::COUNTERS, 0);
+        $run_id      = $dry_run ? 0 : SyncRunRepository::start($force);
+
         // 1) Дізнаємося total, щоб визначити кількість сторінок (якщо --pages=all)
         $first_html = $this->fetch_ajax_html(1, $perPage);
         if (is_wp_error($first_html)) {
+            if ($run_id) {
+                $this->stats['errors']++;
+                SyncRunRepository::finish($run_id, 'failed', $this->stats, 'Перша сторінка: ' . $first_html->get_error_message());
+            }
             WP_CLI::error('Помилка запиту першої сторінки: ' . $first_html->get_error_message());
         }
         $total = $this->extract_total_count($first_html);
@@ -132,8 +154,10 @@ class FetchNbuDataCommand
             $html = $page === 1 ? $first_html : $this->fetch_ajax_html($page, $perPage);
             if (is_wp_error($html)) {
                 WP_CLI::warning("Пропускаю сторінку $page: " . $html->get_error_message());
+                $this->stats['errors']++;
                 continue;
             }
+            $this->stats['pages']++;
 
             $items = $this->parse_items($html);
             WP_CLI::log("Знайдено елементів: " . count($items));
@@ -145,6 +169,7 @@ class FetchNbuDataCommand
                 }
 
                 $processed++;
+                $this->stats['seen']++;
 
                 $title = $item['title'] ?? '';
                 if (!$title) {
@@ -161,18 +186,30 @@ class FetchNbuDataCommand
                     continue;
                 }
 
+                if ($post_id && !$force && !SyncStatus::isPending($post_id)) {
+                    $this->stats['skipped']++;
+                    continue; // повна монета — не чіпаємо
+                }
+
                 if ($post_id) {
                     WP_CLI::log(" Оновлюю пост #$post_id: $title");
                     $this->update_post_and_meta($post_id, $item);
+                    $this->stats['updated']++;
                 } else {
                     $post_id = $this->create_post($title, $item);
                     WP_CLI::log(" Створено пост #$post_id: $title");
+                    $this->stats['created']++;
                 }
 
                 // Картинки → завантажити і скласти в ACF галерею
-                if (!empty($item['images']) && !ManualOverrides::isLocked($post_id, 'images_gallery')) {
+                if (!empty($item['images'])) {
                     $attachment_ids = $this->download_and_attach_images($item['images'], $post_id);
                     $this->update_acf($post_id, $this->acf_map['images_gallery'], $attachment_ids);
+                }
+
+                update_post_meta($post_id, SyncStatus::META_SYNCED_AT, current_time('mysql'));
+                if (!SyncStatus::evaluate($post_id)) {
+                    WP_CLI::log('  ✓ усі дані стягнуто — більше не оновлюється');
                 }
 
                 // Трохи затримки, щоб не лупити сервер
@@ -183,7 +220,21 @@ class FetchNbuDataCommand
             sleep(1);
         }
 
-        WP_CLI::success("Готово. Опрацьовано елементів: $processed");
+        if ($run_id) {
+            $counts                       = SyncStatus::counts();
+            $this->stats['pending_after'] = $counts['pending'];
+            $this->stats['total_after']   = $counts['total'];
+            SyncRunRepository::finish($run_id, 'ok', $this->stats);
+        }
+
+        WP_CLI::success(sprintf(
+            'Готово. Переглянуто: %d, нових: %d, оновлено: %d, пропущено повних: %d, фото завантажено: %d',
+            $this->stats['seen'],
+            $this->stats['created'],
+            $this->stats['updated'],
+            $this->stats['skipped'],
+            $this->stats['images_downloaded']
+        ));
     }
 
     /** ----------------------- HTTP ----------------------- */
@@ -409,15 +460,12 @@ class FetchNbuDataCommand
 
     protected function update_post_and_meta(int $post_id, array $item): void
     {
-        $locked  = ManualOverrides::locked($post_id);
-        $postarr = ['ID' => $post_id];
-        if (!in_array('post_title', $locked, true)) {
-            $postarr['post_title'] = $item['title'] ?? get_the_title($post_id);
-        }
-        if (!in_array('description_html', $locked, true)) {
-            $postarr['post_content'] = $item['description_html'] ?? get_post_field('post_content', $post_id);
-        }
-        if (!empty($item['issue_date']) && !in_array('issue_date', $locked, true)) {
+        $postarr = [
+            'ID'           => $post_id,
+            'post_title'   => $item['title'] ?? get_the_title($post_id),
+            'post_content' => $item['description_html'] ?? get_post_field('post_content', $post_id),
+        ];
+        if (!empty($item['issue_date'])) {
             $postarr['post_date']     = $item['issue_date'] . ' 00:00:00';
             $postarr['post_date_gmt'] = get_gmt_from_date($item['issue_date'] . ' 00:00:00');
         }
@@ -427,33 +475,22 @@ class FetchNbuDataCommand
 
     protected function fill_meta_acf(int $post_id, array $item): void
     {
-        // Поля, змінені вручну в адмінці, імпорт не чіпає (див. ManualOverrides)
-        $locked = array_flip(ManualOverrides::locked($post_id));
-        $free   = fn (string $key): bool => !isset($locked[$key]);
-
         // ✅ 1) Facets → taxonomies
-        $terms = [
-            'coin_series'           => $item['series'] ?? null,
-            'coin_denomination'     => $item['denomination'] ?? null,
-            'coin_material'         => $item['material'] ?? null,
-            'coin_quality'          => $item['quality'] ?? null,
-            'coin_edge'             => $item['edge'] ?? null,
-            'coin_diameter'         => $item['diameter_mm'] ?? null,
-            'coin_mintage_declared' => $item['mintage_declared'] ?? null,
-            'coin_mintage_actual'   => $item['mintage_actual'] ?? null,
-            // Тип і пакування — за назвою (див. CoinTitleClassifier: упаковка — не тип)
-            'coin_type'             => CoinTitleClassifier::type($item['title'] ?? ''),
-            'coin_packaging'        => CoinTitleClassifier::packaging($item['title'] ?? ''),
-            'coin_color'            => 'Некольорова',
-        ];
-        foreach ($terms as $taxonomy => $value) {
-            if ($free($taxonomy)) {
-                $this->assign_taxonomy_single($post_id, $taxonomy, $value);
-            }
-        }
-        if ($free('issue_date')) {
-            $this->assign_taxonomy_single($post_id, 'coin_year', self::year_from_date($item['issue_date'] ?? null));
-        }
+        $this->assign_taxonomy_single($post_id, 'coin_series', $item['series'] ?? null);
+        $this->assign_taxonomy_single($post_id, 'coin_denomination', $item['denomination'] ?? null);
+        $this->assign_taxonomy_single($post_id, 'coin_material', $item['material'] ?? null);
+        $this->assign_taxonomy_single($post_id, 'coin_quality', $item['quality'] ?? null);
+        $this->assign_taxonomy_single($post_id, 'coin_edge', $item['edge'] ?? null);
+        $this->assign_taxonomy_single($post_id, 'coin_diameter', $item['diameter_mm'] ?? null);
+        $this->assign_taxonomy_single($post_id, 'coin_mintage_declared', $item['mintage_declared'] ?? null);
+        $this->assign_taxonomy_single($post_id, 'coin_mintage_actual', $item['mintage_actual'] ?? null);
+        $this->assign_taxonomy_single($post_id, 'coin_year', self::year_from_date($item['issue_date'] ?? null));
+
+        // Тип і пакування — за назвою (див. CoinTitleClassifier: упаковка — не тип)
+        $this->assign_taxonomy_single($post_id, 'coin_type', CoinTitleClassifier::type($item['title'] ?? ''));
+        $this->assign_taxonomy_single($post_id, 'coin_packaging', CoinTitleClassifier::packaging($item['title'] ?? ''));
+
+        $this->assign_taxonomy_single($post_id, 'coin_color', 'Некольорова');
 
         // ✅ 2) Designers -> separate post type (per role)
         $roles = ['designers_artist', 'designers_designer', 'designers_adaptation', 'designers_sculptor'];
@@ -464,7 +501,6 @@ class FetchNbuDataCommand
             'designers_sculptor'   => $item['designers_sculptor']   ?? null,
         ]);
         $designer_ids_by_role = [];
-        $roles = array_values(array_filter($roles, $free));
         foreach ($roles as $role) {
             $ids = $this->upsert_designer_posts($names_by_role[$role]);
             $designer_ids_by_role[$role] = $ids;
@@ -472,56 +508,40 @@ class FetchNbuDataCommand
         }
 
         // ✅ 3) meta лишається тільки для "даних", а не фасетів
-        if ($free('issue_date')) {
-            update_post_meta($post_id, 'issue_date', $item['issue_date'] ?? '');
-        }
-        if ($free('booklet_url')) {
-            update_post_meta($post_id, 'booklet_url', $item['booklet_url'] ?? '');
-        }
-        if ($free('short_title')) {
-            update_post_meta($post_id, 'short_title', $item['short_title'] ?? '');
-        }
+        update_post_meta($post_id, 'issue_date', $item['issue_date'] ?? '');
+        update_post_meta($post_id, 'booklet_url', $item['booklet_url'] ?? '');
+        update_post_meta($post_id, 'short_title', $item['short_title'] ?? '');
 
-        if (isset($item['mintage_declared']) && $free('coin_mintage_declared')) {
+        if (isset($item['mintage_declared'])) {
             update_post_meta($post_id, 'mintage_declared', $item['mintage_declared']);
         }
-        if (isset($item['mintage_actual']) && $free('coin_mintage_actual')) {
+        if (isset($item['mintage_actual'])) {
             update_post_meta($post_id, 'mintage_actual', $item['mintage_actual']);
         }
-        if (isset($item['diameter_mm']) && $free('coin_diameter')) {
+        if (isset($item['diameter_mm'])) {
             update_post_meta($post_id, 'diameter_mm', $item['diameter_mm']);
         }
 
         // (необов’язково) якщо хочеш лишити дубль для дебагу — можеш лишити, але для фільтрів вже не треба:
-        if ($free('coin_quality')) {
-            update_post_meta($post_id, 'quality', $item['quality'] ?? '');
-        }
-        if ($free('coin_edge')) {
-            update_post_meta($post_id, 'edge', $item['edge'] ?? '');
-        }
+         update_post_meta($post_id, 'quality', $item['quality'] ?? '');
+         update_post_meta($post_id, 'edge', $item['edge'] ?? '');
 
         // ✅ 4) ACF (якщо є)
         if (function_exists('update_field')) {
-            if ($free('issue_date')) {
-                $this->update_acf($post_id, $this->acf_map['issue_date'], $item['issue_date'] ?? '');
-            }
-            if ($free('booklet_url')) {
-                $this->update_acf($post_id, $this->acf_map['booklet_url'], $item['booklet_url'] ?? '');
-            }
-            if ($free('description_html')) {
-                $this->update_acf($post_id, $this->acf_map['description_html'], $item['description_html'] ?? '');
-            }
+            $this->update_acf($post_id, $this->acf_map['issue_date'], $item['issue_date'] ?? '');
+            $this->update_acf($post_id, $this->acf_map['booklet_url'], $item['booklet_url'] ?? '');
+            $this->update_acf($post_id, $this->acf_map['description_html'], $item['description_html'] ?? '');
             foreach ($roles as $role) {
                 $this->update_acf($post_id, $this->acf_map[$role], $designer_ids_by_role[$role]);
             }
 
-            if (isset($item['mintage_declared']) && $free('coin_mintage_declared')) {
+            if (isset($item['mintage_declared'])) {
                 $this->update_acf($post_id, $this->acf_map['mintage_declared'], $item['mintage_declared']);
             }
-            if (isset($item['mintage_actual']) && $free('coin_mintage_actual')) {
+            if (isset($item['mintage_actual'])) {
                 $this->update_acf($post_id, $this->acf_map['mintage_actual'], $item['mintage_actual']);
             }
-            if (isset($item['diameter_mm']) && $free('coin_diameter')) {
+            if (isset($item['diameter_mm'])) {
                 $this->update_acf($post_id, $this->acf_map['diameter_mm'], $item['diameter_mm']);
             }
         }
@@ -638,6 +658,7 @@ class FetchNbuDataCommand
             $tmp = download_url($u, 20);
             if (is_wp_error($tmp)) {
                 WP_CLI::warning("  IMG skip: $u (" . $tmp->get_error_message() . ")");
+                $this->stats['images_failed'] = ($this->stats['images_failed'] ?? 0) + 1;
                 continue;
             }
 
@@ -650,10 +671,12 @@ class FetchNbuDataCommand
             if (is_wp_error($id)) {
                 @unlink($tmp);
                 WP_CLI::warning("  IMG attach fail: $u (" . $id->get_error_message() . ")");
+                $this->stats['images_failed'] = ($this->stats['images_failed'] ?? 0) + 1;
                 continue;
             }
 
             update_post_meta((int) $id, NbuImageSource::META_KEY, NbuImageSource::normalize($u));
+            $this->stats['images_downloaded'] = ($this->stats['images_downloaded'] ?? 0) + 1;
             $ids[] = (int)$id;
         }
         // унікалізація

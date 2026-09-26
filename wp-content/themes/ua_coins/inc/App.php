@@ -42,7 +42,7 @@ class App
         (new Admin\ACFFieldsManager\DesignerACFFieldsManager())->boot();
         (new Admin\ACFFieldsManager\CoinCollectionACFFieldsManager())->boot();
 
-        (new Catalog\ManualOverrides())->boot();
+        (new Sync\SyncAdmin())->boot();
     }
 
     private function bootRestApi(): void
