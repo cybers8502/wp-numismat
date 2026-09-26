@@ -770,7 +770,7 @@ class FetchNbuDataCommand
         $canonical = [];
         foreach ($forms as $key => $counts) {
             arsort($counts);
-            $canonical[$key] = (string) array_key_first($counts);
+            $canonical[$key] = DesignerCredits::displayName((string) array_key_first($counts));
         }
         WP_CLI::log(sprintf('Карток: %d, людей у них: %d%s', count($items), count($canonical), $dry ? ' [DRY RUN]' : ''));
 

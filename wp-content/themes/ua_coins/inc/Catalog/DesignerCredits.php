@@ -37,6 +37,21 @@ final class DesignerCredits
         'кочубей миколай' => 'Кочубей Микола',
     ];
 
+    /**
+     * Given names, to tell "Ім'я Прізвище" from "Прізвище Ім'я" — NBU writes both, the catalog shows
+     * "Прізвище Ім'я". Seeded from every designer NBU has credited, plus common Ukrainian names;
+     * a two-word name whose first word is here and second isn't gets swapped (displayName()).
+     */
+    private const GIVEN_NAMES = [
+        'аліна', 'аліса', 'анатолій', 'анджей', 'андрій', 'анна', 'борис', 'вадим', 'валерій', 'валентина',
+        'василь', 'вероніка', 'віктор', 'вікторія', 'віталій', 'владислав', 'володимир', 'вячеслав',
+        'галина', 'григорій', 'дмитро', 'джон', 'драгомир', 'євген', 'есма', 'іван', 'ігор', 'ірина',
+        'катерина', 'кріста', 'лариса', 'леонід', 'любов', 'людмила', 'максим', 'марина', 'марія',
+        'микола', 'михайло', 'надія', 'наталія', 'нікіта', 'оксана', 'олег', 'олександр', 'олександра',
+        'олексій', 'олена', 'ольга', 'павло', 'петро', 'роберт', 'роман', 'світлана', 'святослав',
+        'сергій', 'софія', 'тарас', 'тетяна', 'штефан', 'юлія', 'юрій', 'ян', 'яна', 'ярослав',
+    ];
+
     /** Words that make a "label" a label rather than part of a name. */
     private const LABEL_WORDS = '(?:аверс|реверс|дизайн|автор|художник|скульптор|моделюван|адаптац)';
 
@@ -86,6 +101,18 @@ final class DesignerCredits
         sort($words);
 
         return implode(' ', $words);
+    }
+
+    /** "Олександра Кучинська" → "Кучинська Олександра"; anything else unchanged. */
+    public static function displayName(string $name): string
+    {
+        $words = explode(' ', $name);
+        if (count($words) !== 2) {
+            return $name;
+        }
+        $isGiven = fn (string $w): bool => in_array(mb_strtolower($w, 'UTF-8'), self::GIVEN_NAMES, true);
+
+        return $isGiven($words[0]) && !$isGiven($words[1]) ? $words[1] . ' ' . $words[0] : $name;
     }
 
     public static function cleanName(string $name): string

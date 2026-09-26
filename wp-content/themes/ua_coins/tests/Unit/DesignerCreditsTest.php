@@ -118,6 +118,15 @@ final class DesignerCreditsTest extends TestCase
         $this->assertSame(['designers_artist' => ['Кочубей Микола']], $this->parse(['designers_artist' => 'Кочубей Миколай']));
     }
 
+    public function testDisplayNameIsSurnameFirst(): void
+    {
+        $this->assertSame('Кучинська Олександра', D::displayName('Олександра Кучинська'));
+        $this->assertSame('Кучинська Олександра', D::displayName('Кучинська Олександра'));
+        $this->assertSame('Чернай Ян', D::displayName('Чернай Ян'));
+        $this->assertSame('Цанашка А.', D::displayName('Цанашка А.'));
+        $this->assertSame('Дерегус-Лоренс Наталія', D::displayName('Наталія Дерегус-Лоренс'));
+    }
+
     public function testKeyIgnoresOrderCaseAndApostrophes(): void
     {
         $this->assertSame(D::key('Таран Володимир'), D::key('Володимир Таран'));

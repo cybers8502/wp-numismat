@@ -17,7 +17,7 @@ final class DesignerRegistry
     /** @var array<string,int> key => post ID */
     private array $byKey = [];
 
-    /** @var array<string,string> key => preferred spelling, used when creating */
+    /** @var array<string,string> key => preferred spelling ("Прізвище Ім'я"), used when creating */
     private array $canonical;
 
     private bool $dryRun;
@@ -81,7 +81,7 @@ final class DesignerRegistry
         $id = wp_insert_post([
             'post_type'   => self::POST_TYPE,
             'post_status' => 'publish',
-            'post_title'  => $this->canonical[$key] ?? $name,
+            'post_title'  => $this->canonical[$key] ?? DesignerCredits::displayName($name),
         ], true);
         if (is_wp_error($id)) {
             return 0;
