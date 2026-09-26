@@ -454,6 +454,8 @@ class FetchNbuDataCommand
             WP_CLI::error('Не вдалось створити пост: ' . $post_id->get_error_message());
         }
         update_post_meta((int) $post_id, '_nbu_key', $this->nbu_key($title, $item['issue_date'] ?? null));
+        // Short title пишемо лише при створенні: далі це редакторське поле, імпорт його не оновлює.
+        update_post_meta((int) $post_id, 'short_title', $item['short_title'] ?? '');
         $this->fill_meta_acf($post_id, $item);
         return (int)$post_id;
     }
@@ -510,7 +512,6 @@ class FetchNbuDataCommand
         // ✅ 3) meta лишається тільки для "даних", а не фасетів
         update_post_meta($post_id, 'issue_date', $item['issue_date'] ?? '');
         update_post_meta($post_id, 'booklet_url', $item['booklet_url'] ?? '');
-        update_post_meta($post_id, 'short_title', $item['short_title'] ?? '');
 
         if (isset($item['mintage_declared'])) {
             update_post_meta($post_id, 'mintage_declared', $item['mintage_declared']);
