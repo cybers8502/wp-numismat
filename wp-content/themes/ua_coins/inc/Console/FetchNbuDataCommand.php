@@ -3,6 +3,8 @@
 namespace Coins\Console;
 
 use Coins\Catalog\CoinTitleClassifier;
+use Coins\Catalog\DesignerCredits;
+use Coins\Catalog\DesignerRegistry;
 use Coins\Media\NbuImageSource;
 use Coins\Sync\SyncRunRepository;
 use Coins\Sync\SyncStatus;
@@ -53,6 +55,12 @@ class FetchNbuDataCommand
                         'optional'    => true,
                         'description' => 'Re-import coins already marked complete too (see SyncStatus)',
                     ],
+                    [
+                        'type'        => 'flag',
+                        'name'        => 'designers-only',
+                        'optional'    => true,
+                        'description' => 'Only re-link every coin\'s designers from NBU (all coins, complete or not); with --pages=all also delete designers no coin uses',
+                    ],
                 ],
             ]
         );
@@ -67,6 +75,9 @@ class FetchNbuDataCommand
 
     /** @var array<string,int> лічильники поточного запуску → SyncRunRepository */
     protected $stats = [];
+
+    /** @var DesignerRegistry|null */
+    protected $designers = null;
     protected $acf_map = [
         'series'              => 'series',
         'denomination'        => 'denomination',
@@ -110,13 +121,15 @@ class FetchNbuDataCommand
         $dry_run = isset($assoc_args['dry-run']);
         $force   = isset($assoc_args['force']);
 
+        $designers_only = isset($assoc_args['designers-only']);
+
         $limit = isset($assoc_args['limit']) ? (int) $assoc_args['limit'] : null;
         if ($limit !== null && $limit < 1) {
             $limit = 1;
         }
 
         $this->stats = array_fill_keys(SyncRunRepository::COUNTERS, 0);
-        $run_id      = $dry_run ? 0 : SyncRunRepository::start($force);
+        $run_id      = ($dry_run || $designers_only) ? 0 : SyncRunRepository::start($force);
 
         // 1) Дізнаємося total, щоб визначити кількість сторінок (якщо --pages=all)
         $first_html = $this->fetch_ajax_html(1, $perPage);
@@ -142,6 +155,12 @@ class FetchNbuDataCommand
             $perPage,
             $dry_run ? ' [DRY RUN]' : ''
         ));
+
+        if ($designers_only) {
+            $this->rebuild_designers($pages, $perPage, $first_html, $dry_run, $pages_arg === 'all' && $limit === null);
+
+            return;
+        }
 
         require_once ABSPATH . 'wp-admin/includes/file.php';
         require_once ABSPATH . 'wp-admin/includes/media.php';
@@ -501,19 +520,11 @@ class FetchNbuDataCommand
 
         $this->assign_taxonomy_single($post_id, 'coin_color', 'Некольорова');
 
-        // ✅ 2) Designers -> separate post type (per role)
-        $roles = ['designers_artist', 'designers_designer', 'designers_adaptation', 'designers_sculptor'];
-        $names_by_role = $this->resolve_designer_roles([
-            'designers_artist'     => $item['designers_artist']     ?? null,
-            'designers_designer'   => $item['designers_designer']   ?? null,
-            'designers_adaptation' => $item['designers_adaptation'] ?? null,
-            'designers_sculptor'   => $item['designers_sculptor']   ?? null,
-        ]);
-        $designer_ids_by_role = [];
+        // ✅ 2) Designers -> separate post type (per role), розбір — DesignerCredits
+        $roles                = DesignerCredits::ROLES;
+        $designer_ids_by_role = $this->designer_ids_by_role($item);
         foreach ($roles as $role) {
-            $ids = $this->upsert_designer_posts($names_by_role[$role]);
-            $designer_ids_by_role[$role] = $ids;
-            update_post_meta($post_id, $role, $ids);
+            update_post_meta($post_id, $role, $designer_ids_by_role[$role]);
         }
 
         // ✅ 3) meta лишається тільки для "даних", а не фасетів
@@ -724,162 +735,137 @@ class FetchNbuDataCommand
         return null;
     }
 
-    protected function parse_designers(?string $raw): array
+    /**
+     * `--designers-only`: заново розбирає дизайнерів з карток НБУ для *всіх* знайдених монет
+     * (повних теж — це виправлення старих даних, а не звичайний імпорт) і переприв'язує їх. Назва
+     * кожної людини — найчастіше написання в НБУ. З повним каталогом (--pages=all, без --limit)
+     * наприкінці видаляє дизайнерів, на яких не посилається жодна монета — фрази на кшталт
+     * «аверс: X; реверс: Y», створені старим парсером.
+     *
+     * @param array<int,int> $pages
+     */
+    protected function rebuild_designers(array $pages, int $perPage, string $first_html, bool $dry, bool $full): void
     {
-        $raw = trim((string) $raw);
-        if ($raw === '') {
-            return [];
+        // 1) Усі картки — щоб канонічне написання рахувалось по всьому каталогу
+        $items = [];
+        foreach ($pages as $page) {
+            $html = $page === 1 ? $first_html : $this->fetch_ajax_html($page, $perPage);
+            if (is_wp_error($html)) {
+                // Без повного набору карток видаляти «непотрібних» дизайнерів не можна.
+                WP_CLI::error("Сторінка $page: " . $html->get_error_message() . ' — нічого не змінено.');
+            }
+            $items = array_merge($items, $this->parse_items($html));
         }
 
-        // Найчастіше там один або кілька через кому/крапку з комою
-        $parts = preg_split('~\s*[,;]\s*~u', $raw);
-        $parts = array_values(array_filter(array_map('trim', $parts)));
+        $roles = array_flip(DesignerCredits::ROLES);
+        $forms = [];
+        foreach ($items as $item) {
+            foreach (DesignerCredits::parse(array_intersect_key($item, $roles)) as $names) {
+                foreach ($names as $name) {
+                    $key                = DesignerCredits::key($name);
+                    $forms[$key][$name] = ($forms[$key][$name] ?? 0) + 1;
+                }
+            }
+        }
+        $canonical = [];
+        foreach ($forms as $key => $counts) {
+            arsort($counts);
+            $canonical[$key] = (string) array_key_first($counts);
+        }
+        WP_CLI::log(sprintf('Карток: %d, людей у них: %d%s', count($items), count($canonical), $dry ? ' [DRY RUN]' : ''));
 
-        // прибрати дублікати
-        return array_values(array_unique($parts));
-    }
-
-    /**
-     * Розбирає сирі рядки по ролях, враховуючи вбудовані анотації.
-     *
-     * Розділювач між записами — кома.
-     * Якщо запис починається з ключового слова ролі + тире, ім'я кидається у ту роль.
-     * Якщо ключового слова немає — ім'я кидається у designers_designer за замовчуванням.
-     *
-     * Приклади:
-     *   Художник: "Дем'яненко, адаптація дизайну – Кучинська"
-     *   → designers_artist=['Дем'яненко'], designers_adaptation=['Кучинська']
-     *
-     *   Скульптор: "Дем'яненко"
-     *   → designers_sculptor=['Дем'яненко']
-     *
-     * @param  array<string,string|null> $raw  ключ = роль, значення = сирий рядок з НБУ
-     * @return array<string,string[]>
-     */
-    protected function resolve_designer_roles(array $raw): array
-    {
-        $result = [
-            'designers_artist'     => [],
-            'designers_designer'   => [],
-            'designers_adaptation' => [],
-            'designers_sculptor'   => [],
-        ];
-
-        // Порядок важливий: довші фрази перевіряємо першими
-        $keywords = [
-            'адаптація дизайну' => 'designers_adaptation',
-            'дизайнер'          => 'designers_designer',
-            'скульптор'         => 'designers_sculptor',
-            'художник'          => 'designers_artist',
-        ];
-
-        foreach ($raw as $label_role => $value) {
-            $value = trim((string) $value);
-            if ($value === '') {
+        // 2) Переприв'язка
+        $this->designers = new DesignerRegistry($canonical, $dry);
+        $changed = 0;
+        $same    = 0;
+        $keep    = []; // ID, що лишаться (для оцінки видалення в dry run)
+        $seen    = [];
+        foreach ($items as $item) {
+            $post_id = $item['title'] ? $this->find_existing_post($item['title'], $item['issue_date'] ?? null) : null;
+            if (!$post_id) {
                 continue;
             }
+            $seen[$post_id] = true;
 
-            // Розбиваємо по комі — розділювач між записами в одному полі
-            $segments = preg_split('~\s*,\s*~u', $value);
-
-            foreach ($segments as $segment) {
-                $segment = trim($segment);
-                if ($segment === '') {
-                    continue;
-                }
-
-                $assigned_role = $label_role; // роль, визначена HTML-міткою
-                $name_part     = $segment;
-
-                // Перевіряємо вбудовану анотацію: "роль – ПІБ"
-                // Підтримуємо: – (en-dash), — (em-dash), - (hyphen)
-                foreach ($keywords as $keyword => $role) {
-                    $pattern = '~^' . preg_quote($keyword, '~') . '\s*[–—\-]+\s*(.+)$~iu';
-                    if (preg_match($pattern, $segment, $m)) {
-                        $assigned_role = $role;
-                        $name_part     = trim($m[1]);
-                        break;
+            $new = $this->designer_ids_by_role($item);
+            $old = [];
+            foreach (DesignerCredits::ROLES as $role) {
+                $old[$role] = array_map('intval', (array) (get_post_meta($post_id, $role, true) ?: []));
+                $keep      += array_fill_keys($new[$role], true);
+            }
+            if ($old === $new) {
+                $same++;
+                continue;
+            }
+            $changed++;
+            if ($changed <= 15) {
+                WP_CLI::log(sprintf(' #%d %s', $post_id, $item['title']));
+                foreach (DesignerCredits::ROLES as $role) {
+                    if ($old[$role] !== $new[$role]) {
+                        WP_CLI::log(sprintf(
+                            '    %s: %s  →  %s',
+                            str_replace('designers_', '', $role),
+                            implode(' | ', array_map('get_the_title', $old[$role])) ?: '—',
+                            implode(' | ', DesignerCredits::parse(array_intersect_key($item, $roles))[$role]) ?: '—'
+                        ));
                     }
                 }
-
-                // Якщо роль не визначена анотацією і HTML-мітка не відповідає жодній ролі,
-                // кидаємо в дизайнери за замовчуванням
-                if (!array_key_exists($assigned_role, $result)) {
-                    $assigned_role = 'designers_designer';
-                }
-
-                if ($name_part !== '') {
-                    $result[$assigned_role][] = $name_part;
+            }
+            if (!$dry) {
+                foreach (DesignerCredits::ROLES as $role) {
+                    update_post_meta($post_id, $role, $new[$role]);
+                    $this->update_acf($post_id, $role, $new[$role]);
                 }
             }
         }
+        WP_CLI::log(sprintf('Монет з іншими дизайнерами: %d, без змін: %d, не знайдено в НБУ: %d', $changed, $same, count($items) - $changed - $same));
+        WP_CLI::log(sprintf('Нових дизайнерів: %d', $this->designers->createdCount()));
 
-        // Дедублікація
-        foreach ($result as &$names) {
-            $names = array_values(array_unique($names));
+        // 3) Канонічні назви
+        foreach ($this->designers->applyCanonicalTitles() as $id => [$from, $to]) {
+            WP_CLI::log(sprintf('  перейменовано #%d: %s → %s', $id, $from, $to));
         }
 
-        return $result;
-    }
+        // 4) Непотрібні дизайнери
+        if (!$full) {
+            WP_CLI::log('Неповний прохід (--pages≠all або --limit) — дизайнерів не видаляю.');
+        } elseif ($dry) {
+            // Лишаться: нові прив'язки + старі у монет, яких немає в картках НБУ.
+            foreach (get_posts(['post_type' => $this->post_type, 'post_status' => 'any', 'posts_per_page' => -1, 'fields' => 'ids']) as $id) {
+                if (!isset($seen[(int) $id])) {
+                    foreach (DesignerCredits::ROLES as $role) {
+                        $keep += array_fill_keys(array_map('intval', (array) (get_post_meta((int) $id, $role, true) ?: [])), true);
+                    }
+                }
+            }
+            $all = get_posts(['post_type' => DesignerRegistry::POST_TYPE, 'post_status' => 'any', 'posts_per_page' => -1, 'fields' => 'ids']);
+            $gone = array_filter($all, fn ($id) => !isset($keep[(int) $id]));
+            WP_CLI::log(sprintf('Буде видалено дизайнерів: %d з %d', count($gone), count($all)));
+        } else {
+            $deleted = $this->designers->deleteUnreferenced();
+            WP_CLI::log(sprintf('Видалено дизайнерів, на яких ніхто не посилається: %d', count($deleted)));
+        }
 
-    /** Пробіли стиснуті, без крапки в кінці: «Корень  Лариса» і «Аліса Іванова.» — ті самі люди. */
-    public static function normalize_designer_name(string $name): string
-    {
-        return rtrim(trim((string) preg_replace('~\s+~u', ' ', $name)), '. ');
+        WP_CLI::success($dry ? 'Dry run — нічого не змінено.' : 'Дизайнерів переприв\'язано.');
     }
 
     /**
-     * Дизайнер з *точно* таким ім'ям (без урахування регістру — так порівнює колейшн БД). Раніше тут
-     * був пошук `'s' => $name`, тобто LIKE-збіг по частині назви: «Іваненко Святослав» чіплявся до
-     * першого-ліпшого поста, що містить це ім'я (напр. «аверс: Іваненко Святослав; реверс: …»).
-     * Збережені назви нормалізуються так само, як нове ім'я (подвійні пробіли, крапка в кінці).
+     * Сирі поля «Художник:»/«Скульптор:» картки → ID дизайнерів по ролях.
+     *
+     * @param array<string,mixed> $item
+     * @return array<string,array<int,int>>
      */
-    protected function find_designer_by_name(string $name): int
+    protected function designer_ids_by_role(array $item): array
     {
-        global $wpdb;
+        $this->designers ??= new DesignerRegistry();
 
-        $id = $wpdb->get_var($wpdb->prepare(
-            "SELECT ID FROM {$wpdb->posts}
-              WHERE post_type = 'designer' AND post_status NOT IN ('trash', 'auto-draft')
-                AND TRIM(TRAILING '.' FROM TRIM(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(post_title, '\r', ' '), '\n', ' '), '\t', ' '), '  ', ' '), '  ', ' '))) = %s
-              ORDER BY ID ASC
-              LIMIT 1",
-            $name
-        ));
-
-        return (int) $id;
-    }
-
-    protected function upsert_designer_posts(array $names): array
-    {
-        $ids = [];
-
-        foreach ($names as $name) {
-            $name = self::normalize_designer_name($name);
-            if ($name === '') {
-                continue;
-            }
-
-            $id = $this->find_designer_by_name($name);
-
-            if (!$id) {
-                $created = wp_insert_post([
-                    'post_type'   => 'designer',
-                    'post_status' => 'publish',
-                    'post_title'  => $name,
-                ]);
-
-                if (is_wp_error($created)) {
-                    WP_CLI::warning("Designer create failed '{$name}': " . $created->get_error_message());
-                    continue;
-                }
-                $id = (int) $created;
-            }
-
-            $ids[] = $id;
+        $names = DesignerCredits::parse(array_intersect_key($item, array_flip(DesignerCredits::ROLES)));
+        $ids   = [];
+        foreach ($names as $role => $roleNames) {
+            $ids[$role] = $this->designers->idsFor($roleNames);
         }
 
-        return array_values(array_unique($ids));
+        return $ids;
     }
 
     protected function ensure_term(string $taxonomy, string $name, int $parent = 0): int
