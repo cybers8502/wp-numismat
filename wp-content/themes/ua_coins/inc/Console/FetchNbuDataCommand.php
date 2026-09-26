@@ -774,21 +774,32 @@ class FetchNbuDataCommand
         }
         WP_CLI::log(sprintf('Карток: %d, людей у них: %d%s', count($items), count($canonical), $dry ? ' [DRY RUN]' : ''));
 
-        // 2) Переприв'язка
+        // 2) Переприв'язка. НБУ іноді має дві картки однієї монети (та сама назва й дата → один пост)
+        // з різним складом авторів — тоді об'єднуємо, а не перезаписуємо останньою.
         $this->designers = new DesignerRegistry($canonical, $dry);
-        $changed = 0;
-        $same    = 0;
-        $keep    = []; // ID, що лишаться (для оцінки видалення в dry run)
-        $seen    = [];
+        $by_post = [];
         foreach ($items as $item) {
             $post_id = $item['title'] ? $this->find_existing_post($item['title'], $item['issue_date'] ?? null) : null;
             if (!$post_id) {
                 continue;
             }
-            $seen[$post_id] = true;
+            $ids = $this->designer_ids_by_role($item);
+            if (isset($by_post[$post_id])) {
+                foreach ($ids as $role => $roleIds) {
+                    $ids[$role] = array_values(array_unique(array_merge($by_post[$post_id]['ids'][$role], $roleIds)));
+                }
+                $item['title'] .= ' (+ дубль картки НБУ)';
+            }
+            $by_post[$post_id] = ['item' => $item, 'ids' => $ids];
+        }
 
-            $new = $this->designer_ids_by_role($item);
-            $old = [];
+        $changed = 0;
+        $same    = 0;
+        $keep    = []; // ID, що лишаться (для оцінки видалення в dry run)
+        $seen    = [];
+        foreach ($by_post as $post_id => ['item' => $item, 'ids' => $new]) {
+            $seen[$post_id] = true;
+            $old            = [];
             foreach (DesignerCredits::ROLES as $role) {
                 $old[$role] = array_map('intval', (array) (get_post_meta($post_id, $role, true) ?: []));
                 $keep      += array_fill_keys($new[$role], true);
@@ -806,7 +817,7 @@ class FetchNbuDataCommand
                             '    %s: %s  →  %s',
                             str_replace('designers_', '', $role),
                             implode(' | ', array_map('get_the_title', $old[$role])) ?: '—',
-                            implode(' | ', DesignerCredits::parse(array_intersect_key($item, $roles))[$role]) ?: '—'
+                            implode(' | ', array_map(fn ($id) => $id ? get_the_title($id) : '(новий)', $new[$role])) ?: '—'
                         ));
                     }
                 }
@@ -818,7 +829,7 @@ class FetchNbuDataCommand
                 }
             }
         }
-        WP_CLI::log(sprintf('Монет з іншими дизайнерами: %d, без змін: %d, не знайдено в НБУ: %d', $changed, $same, count($items) - $changed - $same));
+        WP_CLI::log(sprintf('Карток: %d → монет: %d. З іншими дизайнерами: %d, без змін: %d', count($items), count($by_post), $changed, $same));
         WP_CLI::log(sprintf('Нових дизайнерів: %d', $this->designers->createdCount()));
 
         // 3) Канонічні назви
