@@ -15,6 +15,7 @@ wp nbu parse-souvenir --pages=1-3 --per-page=100
 wp nbu parse-souvenir --pages=1 --per-page=5 --limit=1
 wp nbu parse-souvenir --pages=1 --dry-run   # preview without writing to DB
 wp nbu parse-souvenir --pages=all --force   # re-import coins already marked complete too
+wp nbu parse-souvenir --pages=all --designers-only --dry-run  # re-link designers from NBU
 
 # Compute the "Оновлювати з НБУ" flag for every coin from its current data
 # (see "NBU import" below). Re-running resets flags an admin set by hand.
@@ -81,6 +82,14 @@ its reason in the class docblock:
 - **Every run is logged** in `{prefix}coin_sync_runs` (`Sync\SyncRunRepository`, created on first
   use) and reported on Coins → Синхронізація НБУ. A run left `running` died mid-way.
 - **`short_title` is written once, at creation** — an editorial field, never updated afterwards.
+- **Designers are parsed, not split** (`Catalog\DesignerCredits`). NBU has only "Художник:"/
+  "Скульптор:"; roles live in prose ("аверс: A; реверс: B", "адаптація дизайну – C", "програмне
+  моделювання: D"). A person is identified order/case/apostrophe-insensitively ("Таран Володимир" =
+  "Володимир Таран", «Демяненко» = «Дем`яненко») and looked up by that key
+  (`Catalog\DesignerRegistry`) — never by a LIKE search, which once attached "аверс: Кочубей Микола;
+  реверс: Таран Володимир" to 404 coins. `wp nbu parse-souvenir --pages=all --designers-only
+  [--dry-run]` re-links every coin from NBU and deletes designers nobody references; NBU cards that
+  duplicate one coin get their credits merged.
 - **Type and packaging come from the title** (`Catalog\CoinTitleClassifier`). Packaging is not a
   type: a coin "у сувенірному пакованні" is `Монета` with packaging `В сувенірному пакуванні`,
   souvenir banknotes are `Банкнота`. `Сувенірна продукція` only applies to «сувенір» outside the
