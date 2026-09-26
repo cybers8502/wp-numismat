@@ -37,9 +37,36 @@ wp nbu parse-souvenir --pages=1 --per-page=5 --limit=5
 
 # Dry run — без запису в БД
 wp nbu parse-souvenir --pages=1 --dry-run
+
+# Оновити й монети, вже позначені повними
+wp nbu parse-souvenir --pages=all --force
 ```
 
-Парсер завантажує монети з `bank.gov.ua` через AJAX POST (`/ua/component/source/searchSouvenierCoinResult`), визначає пакування та завантажує зображення з перевіркою дублікатів.
+Парсер завантажує монети з `bank.gov.ua` через AJAX POST (`/ua/component/source/searchSouvenierCoinResult`), визначає тип і пакування за назвою та завантажує зображення з перевіркою дублікатів.
+
+**Повні монети не оновлюються.** Існуючу монету імпорт перезаписує лише поки стоїть галочка
+«Оновлювати з НБУ» (бічна панель «Синхронізація НБУ» на екрані монети). Галочка ставиться сама,
+якщо бракує аверсу/реверсу, опису чи тиражу або з випуску минуло менше 60 днів, і знімається сама,
+коли все стягнуто. Адмін може поставити її вручну (перезаписати ще раз) або зняти (більше не чіпати).
+Ручні правки повної монети лишаються. `short_title` пишеться лише при створенні.
+
+**Тип — це вміст, а не упаковка:** монета «у сувенірному пакованні» — `Монета` з пакуванням
+`В сувенірному пакуванні`, сувенірні банкноти — `Банкнота`.
+
+Кожен запуск пишеться в журнал; звіт (стан каталогу, підсумки по місяцях, останні запуски) —
+**Coins → Синхронізація НБУ**. Після першого деплою цієї логіки: `wp coins backfill-sync-status`.
+
+### Ремонт зображень
+
+```bash
+wp coins repair-images --dry-run     # що буде змінено
+wp coins repair-images --coin=5899   # лише одна монета
+wp coins repair-images
+```
+
+Перезавантажує з НБУ картинки галерей, що вказують на файл іншої монети, видаляє невикористані
+дублікати вкладень і файли, на які ніхто не посилається. Причина була в `convert-to-webp.php`
+(вважав чужий `avers.webp` уже сконвертованим) і в `?v=N` в URL НБУ — обидва виправлено.
 
 ---
 
@@ -138,6 +165,7 @@ ACF-поля: `issue_date`, `diameter_mm`, `mintage_declared`, `mintage_actual`,
 Фіксовані терміни `coin_color`: `Кольорова`, `Некольорова`
 Фіксовані терміни `coin_packaging`: `Без пакування`, `В сувенірному пакуванні`, `Набір`, `Ролик`
 Фіксовані терміни `coin_type`: `Монета`, `Банкнота`, `Сувенірна продукція`, `Медаль`, `Інвестиційна`
+(визначаються за назвою — `Catalog\CoinTitleClassifier`; упаковка на тип не впливає)
 
 ### CPT `designer`
 
@@ -276,6 +304,14 @@ inc/
 ├── Admin/
 │   ├── PostTypes/                   ← реєстрація CPT
 │   └── ACFFieldsManager/            ← ACF field groups
+├── Catalog/
+│   ├── CoinTitleClassifier.php      ← тип і пакування монети за назвою НБУ
+│   └── SortKeyService.php           ← денормалізовані ключі сортування
+├── Media/NbuImageSource.php         ← ідентичність/ім'я файлу картинки НБУ
+├── Sync/
+│   ├── SyncStatus.php               ← «Оновлювати з НБУ»: правила повноти монети
+│   ├── SyncRunRepository.php        ← журнал запусків ({prefix}coin_sync_runs)
+│   └── SyncAdmin.php                ← бічна панель, колонка НБУ, сторінка «Синхронізація НБУ»
 ├── Assets/AssetManager.php
 ├── Security/
 │   ├── CorsService.php        ← CORS allowlist (COINS_ALLOWED_ORIGINS)
@@ -294,6 +330,8 @@ inc/
 │   └── AuthGraphQL.php        ← logout
 └── Console/                   ← див. inc/Console/README.md
     ├── FetchNbuDataCommand.php     ← WP-CLI імпортер монет (bank.gov.ua)
+    ├── BackfillSyncStatusCommand.php ← WP-CLI: порахувати «Оновлювати з НБУ» для всіх монет
+    ├── RepairImagesCommand.php     ← WP-CLI: ремонт картинок і дублікатів вкладень
     ├── InstallSchemaCommand.php    ← WP-CLI: створити/оновити таблицю coin_prices
     └── MigratePricesCommand.php    ← WP-CLI: одноразова міграція coin_price CPT → таблиця coin_prices
 ```

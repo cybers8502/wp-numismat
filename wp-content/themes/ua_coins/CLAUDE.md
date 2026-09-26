@@ -14,6 +14,17 @@ wp nbu parse-souvenir --pages=all
 wp nbu parse-souvenir --pages=1-3 --per-page=100
 wp nbu parse-souvenir --pages=1 --per-page=5 --limit=1
 wp nbu parse-souvenir --pages=1 --dry-run   # preview without writing to DB
+wp nbu parse-souvenir --pages=all --force   # re-import coins already marked complete too
+
+# Compute the "Оновлювати з НБУ" flag for every coin from its current data
+# (see "NBU import" below). Re-running resets flags an admin set by hand.
+wp coins backfill-sync-status
+
+# Repair coin images that point at another coin's file, delete duplicate
+# attachments (see "NBU import" below). Dry-run first.
+wp coins repair-images --dry-run
+wp coins repair-images --coin=5899
+wp coins repair-images
 
 # One-time backfill of the coin_year term (from issue_date) for posts that
 # predate the taxonomy — the importer does it inline for everything it touches.
@@ -50,9 +61,40 @@ Only registered when `WP_CLI` is defined (see `functions.php`), alongside `Insta
 - `Admin\ACFFieldsManager\CoinACFFieldsManager` — ACF fields for `coins`
 - `Admin\ACFFieldsManager\DesignerACFFieldsManager` — ACF fields for `designer`
 - `Admin\ACFFieldsManager\CoinCollectionACFFieldsManager` — ACF fields for `coin_collection`
+- `Sync\SyncAdmin` — "Синхронізація НБУ" meta box, НБУ column/view on the coin list, Coins → Синхронізація НБУ report page
 - `Rest\ApiRouter` — registers REST routes via `rest_api_init`
 - `GraphQL\GraphQLRegistrar` — registers GraphQL types/fields/queries/mutations via `graphql_register_types` (only if WPGraphQL is active)
 - `Cron\DailyImportScheduler` — schedules the recurring NBU import
+
+## NBU import (`wp nbu parse-souvenir`)
+
+Runs nightly from `cron-coins.sh` (import, then `convert-to-webp.php`). Non-obvious rules, each with
+its reason in the class docblock:
+
+- **Complete coins are skipped** (`Sync\SyncStatus`). An existing coin is re-imported — every field
+  overwritten — only while it's *pending*: fewer than 2 images, no description or mintage, or issued
+  less than `GRACE_DAYS` (60) ago, since NBU adds photos late. The flag (`_nbu_sync_pending`, the
+  "Оновлювати з НБУ" checkbox) is re-evaluated after each import and clears itself; an admin can tick
+  it to force one more re-import or untick it to freeze a coin. No flag stored counts as pending.
+  Diameter/series/denomination are deliberately not required — sets and rolls have none. So hand
+  edits to a complete coin survive; there is no per-field locking.
+- **Every run is logged** in `{prefix}coin_sync_runs` (`Sync\SyncRunRepository`, created on first
+  use) and reported on Coins → Синхронізація НБУ. A run left `running` died mid-way.
+- **`short_title` is written once, at creation** — an editorial field, never updated afterwards.
+- **Type and packaging come from the title** (`Catalog\CoinTitleClassifier`). Packaging is not a
+  type: a coin "у сувенірному пакованні" is `Монета` with packaging `В сувенірному пакуванні`,
+  souvenir banknotes are `Банкнота`. `Сувенірна продукція` only applies to «сувенір» outside the
+  packaging phrase (none in the catalog today). Both NBU spellings (пакованні / упаковці) count.
+- **Images are identified by URL without its query string** (`Media\NbuImageSource`): NBU bumps a
+  site-wide `?v=N`, which used to re-download the whole catalog as new attachments. Commemorative
+  photos all share the basenames `avers.jpg`/`revers.jpg`, so they're saved as `nbu-{id}-avers.jpg`.
+- **`convert-to-webp.php` never reuses an existing `.webp`** — it gets a `-N` suffix. Treating it as
+  "already converted" once repointed ~400 attachments at other coins' photos;
+  `wp coins repair-images` is what fixed that data.
+
+Coins are edited on the **classic screen, not Gutenberg** (`CoinPostTypeRegistrar::useClassicEditor`):
+Gutenberg moves ACF meta boxes with `appendChild`, which reloads the Description field's TinyMCE
+iframe blank — the Visual tab randomly showed nothing while the Text tab had the text.
 
 ## Data Model
 
