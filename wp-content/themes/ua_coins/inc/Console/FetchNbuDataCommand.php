@@ -382,7 +382,14 @@ class FetchNbuDataCommand
     {
         // Знаходимо span.mark з точним текстом і читаємо сусідній span.mark-text
         $node = $xp->query(".//span[contains(@class,'mark') and normalize-space(text())='{$label}']/following-sibling::span[contains(@class,'mark-text')][1]", $ctx)->item(0);
-        return $node ? trim($node->textContent) : null;
+        if (!$node) {
+            return null;
+        }
+        $value = trim($node->textContent);
+
+        // НБУ іноді рендерить порожнє поле як JS-заглушку (напр. «Скульптор: undefined») — це не
+        // значення, інакше імпорт створює дизайнера/терм з такою назвою.
+        return in_array(mb_strtolower($value), ['', 'undefined', 'null', 'nan'], true) ? null : $value;
     }
 
     protected function xp_text(DOMXPath $xp, string $q, ?DOMNode $ctx = null): ?string
